@@ -4,7 +4,7 @@ import { db, handleFirestoreError, OperationType } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { ROLE_HIERARCHY, Role } from "../lib/roles";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell } from "recharts";
-import { Map, AlertTriangle, ArrowUpRight, Zap, Shield } from "lucide-react";
+import { Map, AlertTriangle, ArrowUpRight, Zap, Shield, Users } from "lucide-react";
 import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 
@@ -25,13 +25,104 @@ function toMs(val: any): number {
 
 
 function IncidentMapView({ tickets }: { tickets: any[] }) {
-  const [viewMode, setViewMode] = useState<"group" | "category" | "priority">("group");
+  const [viewMode, setViewMode] = useState<"group" | "category" | "priority" | "individual">("group");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
+
+  // Filters for By Individual
+  const [indDate, setIndDate] = useState("all");
+  const [indPriority, setIndPriority] = useState("all");
+  const [indStatus, setIndStatus] = useState("all");
+  const [indSort, setIndSort] = useState("most_assigned");
+  const [indSearch, setIndSearch] = useState("");
 
   const openTickets = useMemo(
     () => tickets.filter(t => !["Resolved", "Closed", "Canceled"].includes(t.status ?? "")),
     [tickets]
   );
+
+  const individualStats = useMemo(() => {
+    if (viewMode !== "individual") return [];
+    
+    // Apply ticket-level filters before aggregation
+    const now = Date.now();
+    const filteredTickets = tickets.filter(t => {
+      // Date Filter
+      if (indDate === "7d" && now - toMs(t.createdAt) > 7 * 24 * 3600 * 1000) return false;
+      if (indDate === "30d" && now - toMs(t.createdAt) > 30 * 24 * 3600 * 1000) return false;
+      
+      // Priority Filter
+      if (indPriority !== "all" && !t.priority?.includes(indPriority)) return false;
+      
+      // Status Filter
+      if (indStatus !== "all" && t.status !== indStatus) return false;
+
+      return true;
+    });
+
+    const stats: Record<string, any> = {};
+    
+    filteredTickets.forEach(t => {
+      // Aggregate by assignee
+      if (t.assignedTo || t.assignedToName) {
+        const id = t.assignedTo || t.assignedToName;
+        const name = t.assignedToName || t.assignedTo || "Unknown";
+        
+        if (!stats[id]) {
+          stats[id] = { id, name, assigned: 0, created: 0, resolved: 0, pending: 0, inProgress: 0, escalated: 0, closed: 0, openTickets: [] };
+        }
+        
+        stats[id].assigned++;
+        
+        const status = t.status || "New";
+        if (status === "Resolved") stats[id].resolved++;
+        else if (status === "Closed") stats[id].closed++;
+        else if (status === "In Progress") stats[id].inProgress++;
+        else if (status === "Escalated") stats[id].escalated++;
+        else if (status !== "Canceled") stats[id].pending++;
+        
+        if (!["Resolved", "Closed", "Canceled"].includes(status)) {
+          stats[id].openTickets.push(t);
+        }
+      }
+      
+      // Aggregate by creator
+      if (t.createdBy) {
+        const id = t.createdBy;
+        const name = t.caller || "Unknown";
+        if (!stats[id]) {
+          stats[id] = { id, name, assigned: 0, created: 0, resolved: 0, pending: 0, inProgress: 0, escalated: 0, closed: 0, openTickets: [] };
+        }
+        // Only count creation if we haven't already filtered out the user logic.
+        stats[id].created++;
+      }
+    });
+
+    return Object.values(stats)
+      .map(s => {
+        const totalCompleted = s.resolved + s.closed;
+        const totalActionable = s.assigned;
+        const resRate = totalActionable > 0 ? (totalCompleted / totalActionable) * 100 : 0;
+        
+        let workload = "Low";
+        const active = s.pending + s.inProgress + s.escalated;
+        if (active > 10) workload = "High";
+        else if (active > 4) workload = "Medium";
+        
+        return { ...s, resolutionRate: resRate, workload, activeCount: active };
+      })
+      .filter(s => {
+        if (indSearch && !s.name.toLowerCase().includes(indSearch.toLowerCase())) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (indSort === "highest_resolved") return (b.resolved + b.closed) - (a.resolved + a.closed);
+        if (indSort === "most_pending") return b.pending - a.pending;
+        if (indSort === "highest_workload") return b.activeCount - a.activeCount;
+        if (indSort === "most_active") return (b.assigned + b.created) - (a.assigned + a.created);
+        if (indSort === "best_resolution") return b.resolutionRate - a.resolutionRate;
+        return b.assigned - a.assigned; // most_assigned
+      });
+  }, [tickets, viewMode, indDate, indPriority, indStatus, indSort, indSearch]);
 
   const groupedData = useMemo(() => {
     const groups: Record<string, any[]> = {};
@@ -52,7 +143,7 @@ function IncidentMapView({ tickets }: { tickets: any[] }) {
       .sort((a, b) => b.count - a.count);
   }, [openTickets, viewMode]);
 
-  if (openTickets.length === 0) {
+  if (openTickets.length === 0 && viewMode !== "individual") {
     return (
       <div className="h-96 flex flex-col items-center justify-center text-muted-foreground">
         <Shield className="w-16 h-16 mb-4 opacity-20" />
@@ -62,11 +153,40 @@ function IncidentMapView({ tickets }: { tickets: any[] }) {
     );
   }
 
+  if (viewMode === "individual" && individualStats.length === 0) {
+    return (
+      <div className="space-y-4">
+        {/* Render View Mode Tabs to allow switching back */}
+        <div className="flex items-center gap-2">
+          {(["group", "category", "priority", "individual"] as const).map(mode => (
+            <button
+              key={mode}
+              onClick={() => setViewMode(mode)}
+              className={cn(
+                "px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all",
+                viewMode === mode
+                  ? "bg-sn-green text-sn-dark shadow-sm"
+                  : "bg-muted/50 text-muted-foreground hover:bg-muted"
+              )}
+            >
+              {mode === "group" ? "By Group" : mode === "category" ? "By Category" : mode === "priority" ? "By Priority" : "By Individual"}
+            </button>
+          ))}
+        </div>
+        <div className="h-96 flex flex-col items-center justify-center text-muted-foreground bg-muted/10 rounded-xl border border-dashed border-border">
+          <Users className="w-16 h-16 mb-4 opacity-20" />
+          <p className="font-bold text-lg">No Individual Data</p>
+          <p className="text-sm">No analytics available for the selected filters.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-4">
       {/* View Mode Tabs */}
       <div className="flex items-center gap-2">
-        {(["group", "category", "priority"] as const).map(mode => (
+        {(["group", "category", "priority", "individual"] as const).map(mode => (
           <button
             key={mode}
             onClick={() => setViewMode(mode)}
@@ -77,16 +197,133 @@ function IncidentMapView({ tickets }: { tickets: any[] }) {
                 : "bg-muted/50 text-muted-foreground hover:bg-muted"
             )}
           >
-            {mode === "group" ? "By Group" : mode === "category" ? "By Category" : "By Priority"}
+            {mode === "group" ? "By Group" : mode === "category" ? "By Category" : mode === "priority" ? "By Priority" : "By Individual"}
           </button>
         ))}
         <div className="ml-auto text-xs text-muted-foreground font-medium">
-          {openTickets.length} open incidents
+          {viewMode === "individual" ? `${individualStats.length} individuals` : `${openTickets.length} open incidents`}
         </div>
       </div>
 
+      {viewMode === "individual" && (
+        <div className="p-3 bg-muted/20 border border-border rounded-xl flex flex-wrap gap-3 items-center">
+          <input 
+            type="text" 
+            placeholder="Search User..." 
+            value={indSearch} 
+            onChange={e => setIndSearch(e.target.value)}
+            className="px-3 py-1.5 rounded-lg border border-border text-xs bg-white dark:bg-black/20 outline-none focus:ring-1 focus:ring-sn-green w-40"
+          />
+          <select value={indDate} onChange={e => setIndDate(e.target.value)} className="px-3 py-1.5 rounded-lg border border-border text-xs bg-white dark:bg-black/20 outline-none focus:ring-1 focus:ring-sn-green">
+            <option value="all">All Time</option>
+            <option value="7d">Last 7 Days</option>
+            <option value="30d">Last 30 Days</option>
+          </select>
+          <select value={indPriority} onChange={e => setIndPriority(e.target.value)} className="px-3 py-1.5 rounded-lg border border-border text-xs bg-white dark:bg-black/20 outline-none focus:ring-1 focus:ring-sn-green">
+            <option value="all">All Priorities</option>
+            <option value="Critical">Critical</option>
+            <option value="High">High</option>
+            <option value="Moderate">Moderate</option>
+            <option value="Low">Low</option>
+          </select>
+          <select value={indStatus} onChange={e => setIndStatus(e.target.value)} className="px-3 py-1.5 rounded-lg border border-border text-xs bg-white dark:bg-black/20 outline-none focus:ring-1 focus:ring-sn-green">
+            <option value="all">All Statuses</option>
+            <option value="New">New</option>
+            <option value="In Progress">In Progress</option>
+            <option value="Escalated">Escalated</option>
+            <option value="Resolved">Resolved</option>
+            <option value="Closed">Closed</option>
+          </select>
+          <select value={indSort} onChange={e => setIndSort(e.target.value)} className="px-3 py-1.5 rounded-lg border border-border text-xs bg-white dark:bg-black/20 outline-none focus:ring-1 focus:ring-sn-green ml-auto font-bold text-sn-green">
+            <option value="most_assigned">Most Assigned</option>
+            <option value="highest_resolved">Highest Resolved</option>
+            <option value="most_pending">Most Pending</option>
+            <option value="highest_workload">Highest Workload</option>
+            <option value="most_active">Most Active</option>
+            <option value="best_resolution">Best Resolution Rate</option>
+          </select>
+        </div>
+      )}
+
       {/* Map Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {viewMode === "individual" ? (
+          individualStats.map(user => (
+            <div key={user.id} className="sn-card relative overflow-hidden group p-4 hover:shadow-lg transition-all duration-300">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-sn-green/20 to-sn-green/5 flex items-center justify-center text-sn-green font-black text-lg border border-sn-green/20">
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <h4 className="font-bold text-foreground text-sm truncate w-40" title={user.name}>{user.name}</h4>
+                  <div className="flex items-center gap-1 mt-0.5">
+                    <span className={cn("px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider", 
+                      user.workload === 'High' ? 'bg-red-500/15 text-red-600 border border-red-500/30' : 
+                      user.workload === 'Medium' ? 'bg-orange-500/15 text-orange-600 border border-orange-500/30' : 
+                      'bg-green-500/15 text-green-600 border border-green-500/30'
+                    )}>
+                      {user.workload} Workload
+                    </span>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-2 mb-4">
+                <div className="p-2 bg-muted/30 rounded-lg border border-border flex flex-col justify-center items-center">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Assigned</div>
+                  <div className="font-black text-lg text-foreground">{user.assigned}</div>
+                </div>
+                <div className="p-2 bg-green-500/5 rounded-lg border border-green-500/20 flex flex-col justify-center items-center">
+                  <div className="text-[10px] font-bold text-green-600/80 uppercase tracking-wider mb-0.5">Resolved</div>
+                  <div className="font-black text-lg text-green-600">{user.resolved + user.closed}</div>
+                </div>
+                <div className="p-2 bg-orange-500/5 rounded-lg border border-orange-500/20 flex flex-col justify-center items-center">
+                  <div className="text-[10px] font-bold text-orange-600/80 uppercase tracking-wider mb-0.5">Pending</div>
+                  <div className="font-black text-lg text-orange-600">{user.pending}</div>
+                </div>
+                <div className="p-2 bg-muted/30 rounded-lg border border-border flex flex-col justify-center items-center">
+                  <div className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider mb-0.5">Created</div>
+                  <div className="font-black text-lg text-foreground">{user.created}</div>
+                </div>
+              </div>
+
+              <div className="mb-4">
+                <div className="flex justify-between text-[10px] font-bold uppercase tracking-wider mb-1.5">
+                  <span className="text-muted-foreground">Resolution Rate</span>
+                  <span className={user.resolutionRate > 80 ? "text-sn-green" : user.resolutionRate > 50 ? "text-orange-500" : "text-red-500"}>
+                    {user.resolutionRate.toFixed(1)}%
+                  </span>
+                </div>
+                <div className="w-full bg-muted/50 rounded-full h-1.5 overflow-hidden">
+                  <div className={cn("h-full transition-all duration-1000", 
+                    user.resolutionRate > 80 ? "bg-sn-green" : user.resolutionRate > 50 ? "bg-orange-500" : "bg-red-500"
+                  )} style={{ width: `${user.resolutionRate}%` }}></div>
+                </div>
+              </div>
+
+              {/* Existing Ticket List Style for Open Tickets */}
+              {user.openTickets.length > 0 && (
+                <div className="space-y-1 max-h-24 overflow-y-auto custom-scrollbar pt-2 border-t border-border/50">
+                  {user.openTickets.slice(0, 5).map((t: any) => {
+                    const cfg = PRIORITY_CONFIG[t.priority] || PRIORITY_CONFIG["4 - Low"];
+                    const isSlaBreached = t.responseSlaStatus === "Breached" || t.resolutionSlaStatus === "Breached";
+                    return (
+                      <Link key={t.id} to={`/tickets/${t.id}`} className="flex items-center gap-2 p-1.5 rounded-lg transition-all text-[10px] hover:bg-black/5 dark:hover:bg-white/5">
+                        <div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: cfg.color }} />
+                        <span className="font-mono font-bold text-blue-600 truncate w-16">{t.number || t.id.slice(0,8)}</span>
+                        <span className="text-muted-foreground truncate flex-1">{t.title || "—"}</span>
+                        {isSlaBreached && <Zap className="w-2.5 h-2.5 text-red-500 flex-shrink-0" />}
+                      </Link>
+                    );
+                  })}
+                  {user.openTickets.length > 5 && (
+                    <div className="text-[9px] text-muted-foreground text-center pt-1 font-bold">+{user.openTickets.length - 5} more active</div>
+                  )}
+                </div>
+              )}
+            </div>
+          ))
+        ) : (
         {groupedData.map(group => {
           const criticalCount = group.items.filter((t: any) => t.priority?.includes("Critical")).length;
           const highCount = group.items.filter((t: any) => t.priority?.includes("High")).length;
@@ -217,7 +454,7 @@ function IncidentMapView({ tickets }: { tickets: any[] }) {
               </div>
             </div>
           );
-        })}
+        }))}
       </div>
 
       {/* Legend */}
