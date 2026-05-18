@@ -635,16 +635,38 @@ export function Timesheet() {
       const subject = `Timesheet Notes — ${entryDate}`;
       const body = notesContent || waMessage;
       
+      let recipients: string[] = [];
+      if (emailCc) {
+        if (!emailCcEmails.trim()) {
+          alert("Please enter at least one email address in the Cc field.");
+          return;
+        }
+        recipients.push(emailCcEmails);
+      } else {
+        if (emailContact && user?.email) {
+          recipients.push(user.email);
+        }
+        if (emailResources && user?.email) {
+          recipients.push(user.email);
+        }
+      }
+
+      const toRecipient = recipients.join(", ");
+      if (!toRecipient) {
+        alert("Please select at least one recipient checkbox (Contact, Resources, or Cc).");
+        return;
+      }
+
       const res = await fetch("/api/email/send-note", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          to: emailCcEmails, // or other recipients based on checkboxes
+          to: toRecipient,
           subject,
           body,
           attachments: emailClipboard ? [{
             filename: emailClipboard.label,
-            url: emailClipboard.value // Note: server needs to handle data URLs or I should upload first
+            url: emailClipboard.value
           }] : []
         })
       });
@@ -653,8 +675,7 @@ export function Timesheet() {
 
       alert("Email sent successfully!");
       // Save to history
-      const recipient = emailCcEmails || "Contact";
-      saveMessageHistory("email", recipient, body);
+      saveMessageHistory("email", toRecipient, body);
     } catch (e: any) {
       alert("Error: " + e.message);
     }
@@ -1105,25 +1126,60 @@ export function Timesheet() {
           <div className="grid grid-cols-6 items-center gap-3">
             <label className="text-xs text-muted-foreground font-medium col-span-1">Contact:</label>
             <div className="col-span-5 flex items-center gap-2">
-              <input type="checkbox" checked={emailContact} onChange={e => setEmailContact(e.target.checked)} className="w-4 h-4 accent-blue-600 rounded" />
+              <input 
+                type="checkbox" 
+                checked={emailContact} 
+                onChange={e => {
+                  const val = e.target.checked;
+                  setEmailContact(val);
+                  if (val) setEmailCc(false);
+                }} 
+                className="w-4 h-4 accent-blue-600 rounded" 
+              />
               <span className="text-sm">{emailContactName || "N/A"}</span>
             </div>
           </div>
           <div className="grid grid-cols-6 items-center gap-3">
             <label className="text-xs text-muted-foreground font-medium col-span-1">Resources:</label>
             <div className="col-span-5 flex items-center gap-2">
-              <input type="checkbox" checked={emailResources} onChange={e => setEmailResources(e.target.checked)} className="w-4 h-4 accent-blue-600 rounded" />
+              <input 
+                type="checkbox" 
+                checked={emailResources} 
+                onChange={e => {
+                  const val = e.target.checked;
+                  setEmailResources(val);
+                  if (val) setEmailCc(false);
+                }} 
+                className="w-4 h-4 accent-blue-600 rounded" 
+              />
               <span className="text-sm">{profile?.name || ""}</span>
             </div>
           </div>
           <div className="grid grid-cols-6 items-center gap-3">
             <label className="text-xs text-muted-foreground font-medium col-span-1">Cc:</label>
             <div className="col-span-5 flex items-center gap-2">
-              <input type="checkbox" checked={emailCc} onChange={e => setEmailCc(e.target.checked)} className="w-4 h-4 accent-blue-600 rounded" />
+              <input 
+                type="checkbox" 
+                checked={emailCc} 
+                onChange={e => {
+                  const val = e.target.checked;
+                  setEmailCc(val);
+                  if (val) {
+                    setEmailContact(false);
+                    setEmailResources(false);
+                  }
+                }} 
+                className="w-4 h-4 accent-blue-600 rounded" 
+              />
               <input 
                 type="text"
                 value={emailCcEmails}
                 onChange={e => setEmailCcEmails(e.target.value)}
+                onFocus={() => {
+                  setEmailCc(true);
+                  setEmailContact(false);
+                  setEmailResources(false);
+                }}
                 placeholder="Separate emails with commas"
                 className="flex-1 p-1 border border-border rounded text-sm outline-none focus:ring-1 focus:ring-blue-600 h-8"
               />

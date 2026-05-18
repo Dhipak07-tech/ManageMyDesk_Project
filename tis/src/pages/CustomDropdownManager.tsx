@@ -335,16 +335,42 @@ export function CustomDropdownManager() {
                   <div>
                     <div className="flex items-center justify-between mb-3">
                       <h3 className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Dropdown Options</h3>
-                      <button
-                        onClick={() => handleAddOption(dropdown)}
-                        className="flex items-center gap-1 text-xs font-bold text-sn-green hover:text-sn-green/80 transition-colors"
-                      >
-                        <Plus className="w-3.5 h-3.5" /> Add Option
-                      </button>
                     </div>
+                    
+                    {/* Premium Inline Option Creator */}
+                    <form 
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const formData = new FormData(e.currentTarget);
+                        const label = formData.get("optionLabel") as string;
+                        if (!label?.trim()) return;
+                        
+                        const newOption = { id: `opt_${Date.now()}`, label: label.trim() };
+                        const updated = { ...dropdown, options: [...dropdown.options, newOption] };
+                        saveDropdown(updated);
+                        e.currentTarget.reset();
+                      }}
+                      className="flex gap-2 mb-4"
+                    >
+                      <input
+                        name="optionLabel"
+                        type="text"
+                        placeholder="Type option here (e.g. IT Support, HR)..."
+                        className="flex-grow p-2 border border-border rounded-lg text-xs focus:ring-1 focus:ring-sn-green outline-none bg-white shadow-inner"
+                        required
+                      />
+                      <Button
+                        type="submit"
+                        disabled={saving === dropdown.id}
+                        className="bg-sn-green hover:bg-sn-green/90 text-sn-dark font-bold text-xs h-8 px-3"
+                      >
+                        <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                      </Button>
+                    </form>
+
                     {dropdown.options.length === 0 ? (
-                      <p className="text-xs text-muted-foreground italic py-3 text-center border border-dashed border-border rounded-lg">
-                        No options yet. Click "Add Option" to add choices.
+                      <p className="text-xs text-muted-foreground italic py-4 text-center border border-dashed border-border rounded-lg bg-white">
+                        No options added yet. Type above and click Add!
                       </p>
                     ) : (
                       <div className="space-y-1.5 max-h-52 overflow-y-auto">

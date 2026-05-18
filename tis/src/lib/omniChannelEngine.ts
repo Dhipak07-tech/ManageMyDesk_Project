@@ -32,6 +32,24 @@ export class OmniChannelEngine {
   }
 
   /**
+   * Initializes the default/legacy email transporter using environment variables
+   */
+  private static getTransporter() {
+    return nodemailer.createTransport({
+      host: process.env.SMTP_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.SMTP_PORT || '587'),
+      secure: process.env.SMTP_PORT === '465',
+      auth: {
+        user: process.env.SMTP_USER || 'swedhasris@gmail.com',
+        pass: process.env.SMTP_PASS || '',
+      },
+      tls: {
+        rejectUnauthorized: false
+      }
+    });
+  }
+
+  /**
    * Polls incoming emails for ALL active company configurations.
    */
   static async pollIncomingEmails() {
@@ -66,11 +84,8 @@ export class OmniChannelEngine {
           const connection = await imaps.connect(imapConfig);
           await connection.openBox('INBOX');
 
-          // Search for UNSEEN OR all emails since yesterday to be safe
-          const yesterday = new Date();
-          yesterday.setDate(yesterday.getDate() - 1);
-          
-          const searchCriteria = [['OR', 'UNSEEN', ['SINCE', yesterday]]];
+          // Search only for unseen emails to prevent processing already-seen duplicate emails
+          const searchCriteria = ['UNSEEN'];
           const fetchOptions = {
             bodies: ['HEADER', 'TEXT', ''],
             markSeen: true
@@ -245,20 +260,54 @@ export class OmniChannelEngine {
       } catch {}
 
       // Send Acknowledgement using THIS company's email
-      await this.sendEmailByConfig(config, from, `[${ticketNumber}] Ticket Created: ${subject}`, `
-        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-          <h2 style="color: #2563eb;">${config.company_name} Support</h2>
-          <p>Hello,</p>
-          <p>We have received your email and a new support ticket has been opened for you.</p>
-          <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
-            <p style="margin: 0;"><strong>Ticket Number:</strong> ${ticketNumber}</p>
-            <p style="margin: 5px 0 0 0;"><strong>Subject:</strong> ${subject}</p>
+      try {
+        const ackSubject = `[${ticketNumber}] Ticket Created: ${subject}`;
+        const ackHtml = `
+          <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+            <h2 style="color: #2563eb;">${config.company_name} Support</h2>
+            <p>Hello,</p>
+            <p>We have received your email and a new support ticket has been opened for you.</p>
+            <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+              <p style="margin: 0;"><strong>Ticket Number:</strong> ${ticketNumber}</p>
+              <p style="margin: 5px 0 0 0;"><strong>Subject:</strong> ${subject}</p>
+            </div>
+            <p>Our team will review your request shortly.</p>
+            <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+            <p style="font-size: 12px; color: #64748b;">This is an automated notification from ${config.email_address}.</p>
           </div>
-          <p>Our team will review your request shortly.</p>
-          <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-          <p style="font-size: 12px; color: #64748b;">This is an automated notification from ${config.email_address}.</p>
-        </div>
-      `);
+        `;
+        
+        await this.sendEmailByConfig(config, from, ackSubject, ackHtml);
+
+        // Log success activity
+        await execute(
+          "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [
+            ticketSqlId,
+            "email_sent",
+            "public",
+            "System",
+            `${config.company_name} Auto-Mail`,
+            `Acknowledgement email successfully sent to ${from}`,
+            JSON.stringify({ to: from, subject: ackSubject, sentAt: new Date().toISOString() })
+          ]
+        );
+      } catch (mailErr: any) {
+        console.error(`[OmniChannel] Failed to send inbound auto-ack for ${ticketNumber}:`, mailErr.message);
+        // Log failure activity
+        await execute(
+          "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          [
+            ticketSqlId,
+            "email_failed",
+            "internal",
+            "System",
+            `${config.company_name} Auto-Mail`,
+            `Failed to send acknowledgement email to ${from}: ${mailErr.message}`,
+            JSON.stringify({ to: from, error: mailErr.message, failedAt: new Date().toISOString() })
+          ]
+        );
+      }
 
     } catch (error: any) {
       console.error('[OmniChannel] Error processing email:', error.message);
@@ -290,8 +339,13 @@ export class OmniChannelEngine {
       console.log(`[OmniChannel] Email sent via ${config.company_name} to ${to}`);
       return info;
     } catch (error: any) {
-      console.error(`[OmniChannel] Send error (${config.company_name}):`, error.message);
-      throw error;
+      console.error(`[OmniChannel] Send error (${config.company_name}) - falling back to environment transporter:`, error.message);
+      try {
+        return await this.sendEmail(to, subject, html, attachments);
+      } catch (fallbackError: any) {
+        console.error(`[OmniChannel] Platform SMTP fallback dispatch failed:`, fallbackError.message);
+        throw error;
+      }
     }
   }
 

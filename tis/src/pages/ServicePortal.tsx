@@ -12,6 +12,7 @@ import {
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useTickets } from "../contexts/TicketsContext";
+import { useAuth } from "../contexts/AuthContext";
 import { cn } from "@/lib/utils";
 
 export function ServicePortal() {
@@ -139,6 +140,4 @@ export function ServicePortal() {
   );
 }
 
-function cn(...classes: any[]) {
-  return classes.filter(Boolean).join(" ");
-}
+

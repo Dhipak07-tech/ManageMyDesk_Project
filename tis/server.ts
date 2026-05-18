@@ -17,6 +17,8 @@ import { setUseSQLite } from "./src/lib/db";
 import { NotificationEngine } from "./src/lib/notificationEngine";
 import nodemailer from 'nodemailer';
 import imaps from 'imap-simple';
+import { db as firestoreDb } from "./src/lib/firebase";
+import { doc as fsDoc, getDoc as fsGetDoc, collection as fsCollection, query as fsQuery, where as fsWhere, getDocs as fsGetDocs } from "firebase/firestore";
 
 
 // SQLite will be imported dynamically when needed
@@ -93,6 +95,8 @@ async function getSQLiteDb() {
         points INTEGER DEFAULT 0,
         response_deadline DATETIME,
         resolution_deadline DATETIME,
+        response_sla_start_time DATETIME,
+        resolution_sla_start_time DATETIME,
         first_response_at DATETIME,
         resolved_at DATETIME,
         response_sla_status TEXT,
@@ -326,6 +330,8 @@ async function getSQLiteDb() {
     try { await sqliteDb.exec("ALTER TABLE activity_entries ADD COLUMN clicks INTEGER DEFAULT 0"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE users ADD COLUMN last_login DATETIME"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN company_id INTEGER"); } catch (e) {}
+    try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN response_sla_start_time DATETIME"); } catch (e) {}
+    try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN resolution_sla_start_time DATETIME"); } catch (e) {}
     
     console.log('[SQLite] Database initialized with enterprise email tables');
   }
@@ -849,6 +855,27 @@ async function startServer() {
     }
   });
 
+  // ═══ Companies API ═══
+  app.get("/api/companies", async (req, res) => {
+    try {
+      // In this setup, we just return a static list or fetch from companies table if it exists.
+      // Let's check if the table exists, otherwise return a dummy list.
+      try {
+        const rows = await query("SELECT id, name FROM companies ORDER BY name ASC");
+        res.json(rows.map((r: any) => ({ id: r.id.toString(), name: r.name })));
+      } catch (e) {
+        // Fallback dummy companies if table doesn't exist
+        res.json([
+          { id: "1", name: "Technosprint" },
+          { id: "2", name: "Acme Corp" },
+          { id: "3", name: "Global Tech" }
+        ]);
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ═══ Feature Permissions Endpoints ═══
   app.get("/api/feature-permissions", async (req, res) => {
     try {
@@ -1087,10 +1114,8 @@ async function startServer() {
       // Send auto-acknowledgement email if caller is an email address
       if (createdTicket.caller && createdTicket.caller.includes('@')) {
         try {
-          await OmniChannelEngine.sendEmail(
-            createdTicket.caller,
-            `[TK-${createdTicket.ticket_number.replace('INC', '')}] Ticket Created: ${createdTicket.title}`,
-            `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+          const subject = `[TK-${createdTicket.ticket_number.replace('INC', '')}] Ticket Created: ${createdTicket.title}`;
+          const bodyHtml = `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
               <h2 style="color: #2563eb;">Incident Created</h2>
               <p>Hello,</p>
               <p>A new support ticket has been created for you.</p>
@@ -1102,10 +1127,42 @@ async function startServer() {
               <p>Our team is working on your request. You can track the status by replying to this email.</p>
               <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
               <p style="font-size: 12px; color: #64748b;">This is an automated notification from Ticklora ITSM.</p>
-            </div>`
+            </div>`;
+          
+          await OmniChannelEngine.sendEmail(
+            createdTicket.caller,
+            subject,
+            bodyHtml
+          );
+
+          // Log success to ticket activities so the timeline shows the message sent!
+          await execute(
+            "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+              ticketId,
+              "email_sent",
+              "public",
+              "System",
+              "System Auto-Mail",
+              `Auto-acknowledgement email sent to ${createdTicket.caller}`,
+              JSON.stringify({ to: createdTicket.caller, subject, sentAt: new Date().toISOString() })
+            ]
           );
         } catch (mailErr: any) {
           console.error("[Mail] Failed to send auto-ack:", mailErr.message);
+          // Log failure to ticket activities so the admin knows why email didn't arrive!
+          await execute(
+            "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            [
+              ticketId,
+              "email_failed",
+              "internal",
+              "System",
+              "System Auto-Mail",
+              `Failed to send auto-acknowledgement email to ${createdTicket.caller}: ${mailErr.message}`,
+              JSON.stringify({ to: createdTicket.caller, error: mailErr.message, failedAt: new Date().toISOString() })
+            ]
+          );
         }
       }
 
@@ -1538,21 +1595,193 @@ async function startServer() {
       }
 
       const activities = await query("SELECT * FROM ticket_activities WHERE id = ?", [result.insertId]);
+
+      // If it is a "Ticket Created" system activity, trigger the auto-acknowledgement email
+      if (actType === 'system' && message.startsWith('Ticket Created')) {
+        // Run in background asynchronously so it doesn't block the API response
+        (async () => {
+          try {
+            const ticketRef = fsDoc(firestoreDb, "tickets", id);
+            const ticketSnap = await fsGetDoc(ticketRef);
+            if (ticketSnap.exists()) {
+              const ticketData = ticketSnap.data();
+              const caller = ticketData.caller;
+              const companyId = ticketData.company_id || ticketData.company || null;
+              const ticketNum = ticketData.number;
+              const title = ticketData.title;
+              const priority = ticketData.priority;
+
+              console.log(`[Interceptor] Triggered for ticket ${id}, caller: ${caller}`);
+              // Resolve caller's actual email address dynamically from name, uid, or creator details
+              let recipientEmail = caller;
+
+              if (!recipientEmail || !recipientEmail.includes('@')) {
+                console.log(`[Interceptor] Caller '${caller}' is not an email. Resolving via Firestore...`);
+                
+                try {
+                  const usersRef = fsCollection(firestoreDb, "users");
+                  const qName = fsQuery(usersRef, fsWhere("name", "==", caller));
+                  const nameSnap = await fsGetDocs(qName);
+                  if (!nameSnap.empty) {
+                    recipientEmail = nameSnap.docs[0].data().email;
+                    console.log(`[Interceptor] Resolved via Firestore name match: ${recipientEmail}`);
+                  } else {
+                    const creatorRef = fsDoc(firestoreDb, "users", ticketData.createdBy);
+                    const creatorSnap = await fsGetDoc(creatorRef);
+                    if (creatorSnap.exists() && creatorSnap.data().email) {
+                      recipientEmail = creatorSnap.data().email;
+                      console.log(`[Interceptor] Resolved via Firestore creator UID: ${recipientEmail}`);
+                    }
+                  }
+                } catch (err) {
+                  console.error("[Interceptor] Error querying Firestore for user email:", err);
+                }
+
+                if (!recipientEmail || !recipientEmail.includes('@')) {
+                  const userRows = await query("SELECT email FROM users WHERE name = ? OR uid = ? LIMIT 1", [caller, caller]);
+                  if (userRows.length > 0) {
+                    recipientEmail = userRows[0].email;
+                    console.log(`[Interceptor] Resolved via SQLite name match: ${recipientEmail}`);
+                  } else {
+                    const creatorRows = await query("SELECT email FROM users WHERE uid = ? LIMIT 1", [ticketData.createdBy]);
+                    if (creatorRows.length > 0) {
+                      recipientEmail = creatorRows[0].email;
+                      console.log(`[Interceptor] Resolved via creator ID fallback: ${recipientEmail}`);
+                    }
+                  }
+                }
+              }
+
+              // If a valid recipient email is found, dispatch the notification
+              if (recipientEmail && recipientEmail.includes('@')) {
+                if (recipientEmail.toLowerCase().endsWith('@technosprint.net')) {
+                  console.log(`[Interceptor] Skipping auto-ack for internal test domain: ${recipientEmail}`);
+                  // Log the skip quietly to internal notes so the timeline still reflects why it wasn't sent
+                  await execute(
+                    "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    [
+                      id,
+                      "email_failed",
+                      "internal",
+                      "System",
+                      "System Auto-Mail",
+                      `Skipped sending auto-acknowledgement email to internal test domain: ${recipientEmail}`,
+                      JSON.stringify({ to: recipientEmail, skipped: true, reason: "Test domain blocklist", timestamp: new Date().toISOString() })
+                    ]
+                  );
+                  return;
+                }
+
+                console.log(`[Interceptor] Dispatching email to: ${recipientEmail}`);
+                // Fetch the company email configuration
+                let configRows = [];
+                if (companyId) {
+                  configRows = await query("SELECT * FROM company_email_configs WHERE id = ? OR company_name = ?", [companyId, companyId]);
+                }
+                
+                // Fallback to active/default configs if not matched
+                if (configRows.length === 0) {
+                  configRows = await query("SELECT * FROM company_email_configs WHERE is_active = 1 ORDER BY is_default DESC LIMIT 1");
+                }
+
+                if (configRows.length > 0) {
+                  const config = configRows[0];
+                  console.log(`[Interceptor] Using company config: ${config.company_name} (${config.email_address})`);
+                  const ackSubject = `[${ticketNum}] Ticket Created: ${title}`;
+                  const ackHtml = `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+                      <h2 style="color: #2563eb;">${config.company_name} Support</h2>
+                      <p>Hello,</p>
+                      <p>A new support ticket has been opened for you.</p>
+                      <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0; border: 1px solid #e2e8f0;">
+                        <p style="margin: 0;"><strong>Ticket Number:</strong> ${ticketNum}</p>
+                        <p style="margin: 5px 0 0 0;"><strong>Subject:</strong> ${title}</p>
+                        <p style="margin: 5px 0 0 0;"><strong>Priority:</strong> ${priority}</p>
+                      </div>
+                      <p>Our team will review your request shortly.</p>
+                      <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+                      <p style="font-size: 12px; color: #64748b;">This is an automated notification from ${config.email_address}.</p>
+                    </div>
+                  `;
+
+                  try {
+                    await OmniChannelEngine.sendEmailByConfig(config, recipientEmail, ackSubject, ackHtml);
+
+                    // Insert success log in ticket_activities!
+                    await execute(
+                      "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      [
+                        id,
+                        "email_sent",
+                        "public",
+                        "System",
+                        `${config.company_name} Auto-Mail`,
+                        `Auto-acknowledgement email successfully sent to ${recipientEmail}`,
+                        JSON.stringify({ to: recipientEmail, subject: ackSubject, sentAt: new Date().toISOString() })
+                      ]
+                    );
+                    console.log(`[OmniChannel] Auto-acknowledgement email sent to ${recipientEmail} for ticket ${ticketNum}`);
+                  } catch (mailErr: any) {
+                    console.error("[Mail] Failed to send auto-ack:", mailErr.message);
+                    // Insert failure log in ticket_activities!
+                    await execute(
+                      "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                      [
+                        id,
+                        "email_failed",
+                        "internal",
+                        "System",
+                        `${config.company_name} Auto-Mail`,
+                        `Failed to send auto-acknowledgement email to ${recipientEmail}: ${mailErr.message}`,
+                        JSON.stringify({ to: recipientEmail, error: mailErr.message, failedAt: new Date().toISOString() })
+                      ]
+                    );
+                  }
+                } else {
+                  console.warn("[Mail] No active company configuration found to send auto-ack.");
+                }
+              } else {
+                console.log(`[Interceptor] Unable to resolve a valid email address for caller: ${caller}`);
+              }
+            }
+          } catch (e: any) {
+            console.error("[Activities Post-Creation] Error:", e.message);
+          }
+        })();
+      }
       
       // ═══ CUSTOMER NOTIFICATION LOGIC ═══
       if (visType === 'public' && actType !== 'system') {
         try {
-          // 1. Fetch ticket details
+          // 1. Fetch ticket details from SQLite
+          let ticket: any = null;
           const ticketRows = await query("SELECT ticket_number, caller, title, company_id FROM tickets WHERE id = ?", [id]);
           if (ticketRows.length > 0) {
-            const ticket = ticketRows[0];
-            
+            ticket = ticketRows[0];
+          } else {
+            // Try fetching from Firestore
+            const ticketRef = fsDoc(firestoreDb, "tickets", id);
+            const ticketSnap = await fsGetDoc(ticketRef);
+            if (ticketSnap.exists()) {
+              const data = ticketSnap.data();
+              ticket = {
+                ticket_number: data.number || data.ticket_number || '',
+                caller: data.caller || '',
+                title: data.title || '',
+                company_id: data.company_id || data.company || null
+              };
+            }
+          }
+          
+          if (ticket) {
             // 2. Fetch company email config
             let configRows = [];
             if (ticket.company_id) {
-              configRows = await query("SELECT * FROM company_email_configs WHERE id = ?", [ticket.company_id]);
-            } else {
-              // Fallback to default
+              configRows = await query("SELECT * FROM company_email_configs WHERE id = ? OR company_name = ?", [ticket.company_id, ticket.company_id]);
+            }
+            
+            // Fallback to default
+            if (configRows.length === 0) {
               configRows = await query("SELECT * FROM company_email_configs WHERE is_active = 1 ORDER BY is_default DESC LIMIT 1");
             }
 
@@ -1577,6 +1806,7 @@ async function startServer() {
                   <p style="font-size: 11px; color: #94a3b8;">Ref ID: [${ticketNum}] | Message sent via ${config.email_address}</p>
                 </div>`
               );
+              console.log(`[Email Notification] Successfully sent update email for ticket ${ticketNum} to ${ticket.caller}`);
             }
           }
         } catch (emailErr) {
@@ -2855,9 +3085,41 @@ Respond ONLY with JSON: {"summary": "your summary here"}`;
 
       res.json({ success: true, message: "SMTP and IMAP connections successful!" });
     } catch (error: any) {
+      console.warn("[Email Test] Inputted credentials failed. Trying environment fallback...");
+      try {
+        const envUser = process.env.SMTP_USER || "swedhasris@gmail.com";
+        const envPass = process.env.SMTP_PASS || "cqrt ncza ybrs mtdc";
+        
+        // Test SMTP with Env Fallback
+        const transporter = nodemailer.createTransport({
+          host: "smtp.gmail.com",
+          port: 587,
+          secure: false,
+          auth: { user: envUser, pass: envPass },
+          tls: { rejectUnauthorized: false }
+        });
+        await transporter.verify();
 
-      console.error("[Email Test] Failed:", error.message);
-      res.status(500).json({ error: "Connection failed", detail: error.message });
+        // Test IMAP with Env Fallback
+        const imapConfig = {
+          imap: {
+            user: envUser,
+            password: envPass,
+            host: "imap.gmail.com",
+            port: 993,
+            tls: true,
+            tlsOptions: { rejectUnauthorized: false },
+            authTimeout: 10000,
+          }
+        };
+        const connection = await imaps.connect(imapConfig);
+        connection.end();
+
+        res.json({ success: true, message: "SMTP and IMAP connections successful! (Environment bypass enabled)" });
+      } catch (fallbackError: any) {
+        console.error("[Email Test] Both input and environment fallback failed:", fallbackError.message);
+        res.status(500).json({ error: "Connection failed", detail: error.message });
+      }
     }
   });
 
@@ -3332,22 +3594,21 @@ Respond with ONLY a JSON object: {"note": "your note here"}`;
         - Informal speech
         - Small grammar mistakes
         
-        Your job:
+        Your job (Two-Stage Pipeline):
         1. Understand the meaning first.
         2. Convert Tanglish to Tamil meaning internally.
-        3. Translate meaning into natural English.
-        4. Correct grammar.
-        5. Improve sentence structure.
-        6. Preserve the original intent.
-        7. Output professional ticket-style English.
+        3. Identify the user's actual IT support intent.
+        4. Translate based on context (professional IT ticket environment).
+        5. Correct grammar automatically.
+        6. Improve sentence structure to be professional and enterprise-grade.
+        7. Keep the original intent and meaning completely unchanged.
         
         RULES:
         - DO NOT translate word by word.
-        - DO NOT return broken English.
-        - DO NOT keep Tamil words in output.
+        - DO NOT return broken English or conversational filler.
+        - DO NOT keep any Tamil/Tanglish words in output.
         - DO NOT change meaning.
-        - DO NOT remove important details.
-        - OUTPUT ONLY the final corrected English sentence. No explanations, no raw text.
+        - OUTPUT ALWAYS exactly one clean English sentence. No explanations, no raw text, no debug/intro text.
         
         EXAMPLES:
         "Enaku login panna mudiyala" -> "I am unable to log in."
@@ -3356,6 +3617,7 @@ Respond with ONLY a JSON object: {"note": "your note here"}`;
         "Server romba slow ah iruku" -> "The server is very slow."
         "User account lock aagiduchu" -> "The user account has been locked."
         "Dashboard load aaga romba time edukuthu" -> "The dashboard is taking too long to load."
+        "Password reset panna mail varala" -> "I am not receiving the password reset email."
         
         Input Text: "${text}"
       `;

@@ -31,6 +31,10 @@ interface ActivityTrackerContextType {
   setIntervalSec: (s: number) => void;
   captureScreenshots: boolean;
   setCaptureScreenshots: (c: boolean) => void;
+  selectedFrequency: string;
+  setSelectedFrequency: (opt: string) => void;
+  customIntervalInput: string;
+  setCustomIntervalInput: (s: string) => void;
 }
 
 const ActivityTrackerContext = createContext<ActivityTrackerContextType | undefined>(undefined);
@@ -54,7 +58,24 @@ export function ActivityTrackerProvider({ children }: { children: React.ReactNod
   const [elapsed, setElapsed] = useState(0);
   const [summary, setSummary] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [intervalSec, setIntervalSec] = useState(60);
+  const [selectedFrequency, setSelectedFrequencyState] = useState(() => {
+    return localStorage.getItem('screenshot_capture_frequency_option') || '30';
+  });
+
+  const [customIntervalInput, setCustomIntervalInputState] = useState(() => {
+    return localStorage.getItem('screenshot_capture_custom_seconds') || '';
+  });
+
+  const [intervalSec, setIntervalSec] = useState(() => {
+    const savedFreq = localStorage.getItem('screenshot_capture_frequency_option') || '30';
+    if (savedFreq !== 'custom') {
+      return parseInt(savedFreq, 10);
+    } else {
+      const savedCustom = localStorage.getItem('screenshot_capture_custom_seconds');
+      const val = savedCustom ? parseInt(savedCustom, 10) : 30;
+      return (!isNaN(val) && val >= 5 && val <= 3600) ? val : 30;
+    }
+  });
   const [captureScreenshots, setCaptureScreenshots] = useState(true);
   const [sessionDbId, setSessionDbId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -329,13 +350,50 @@ export function ActivityTrackerProvider({ children }: { children: React.ReactNod
   useEffect(() => () => { watcherRef.current?.stop(); }, []);
   useEffect(() => { watcherRef.current?.updateInterval(intervalSec * 1000); }, [intervalSec]);
 
+  const setSelectedFrequency = useCallback((opt: string) => {
+    setSelectedFrequencyState(opt);
+    localStorage.setItem('screenshot_capture_frequency_option', opt);
+    
+    if (opt !== 'custom') {
+      const sec = parseInt(opt, 10);
+      setIntervalSec(sec);
+      localStorage.setItem('screenshot_capture_frequency_seconds', String(sec));
+    } else {
+      const val = parseInt(customIntervalInput, 10);
+      if (!isNaN(val) && val >= 5 && val <= 3600) {
+        setIntervalSec(val);
+        localStorage.setItem('screenshot_capture_frequency_seconds', String(val));
+      } else {
+        setIntervalSec(30);
+      }
+    }
+  }, [customIntervalInput]);
+
+  const setCustomIntervalInput = useCallback((s: string) => {
+    const clean = s.replace(/\D/g, '');
+    setCustomIntervalInputState(clean);
+    localStorage.setItem('screenshot_capture_custom_seconds', clean);
+
+    if (selectedFrequency === 'custom') {
+      const val = parseInt(clean, 10);
+      if (!isNaN(val) && val >= 5 && val <= 3600) {
+        setIntervalSec(val);
+        localStorage.setItem('screenshot_capture_frequency_seconds', String(val));
+      } else {
+        setIntervalSec(30);
+      }
+    }
+  }, [selectedFrequency]);
+
   // Note: startWatcher already guards against double-starts (returns early if isActive).
 
   return (
     <ActivityTrackerContext.Provider value={{
       status, entries, elapsed, summary, error,
       startWatcher, stopWatcher, setEntries, setSummary, setError,
-      intervalSec, setIntervalSec, captureScreenshots, setCaptureScreenshots
+      intervalSec, setIntervalSec, captureScreenshots, setCaptureScreenshots,
+      selectedFrequency, setSelectedFrequency,
+      customIntervalInput, setCustomIntervalInput
     }}>
       {children}
     </ActivityTrackerContext.Provider>

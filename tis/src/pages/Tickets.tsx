@@ -958,23 +958,6 @@ export function Tickets() {
                     </div>
                   </FeatureGuard>
 
-                  {/* Company */}
-                  <FeatureGuard id="company">
-                    <div className="grid grid-cols-3 items-center gap-4">
-                      <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">Company</label>
-                      <select
-                        value={newTicket.company}
-                        onChange={e => setNewTicket({ ...newTicket, company: e.target.value })}
-                        className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8"
-                      >
-                        <option value="">-- None --</option>
-                        {companies.map(c => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </FeatureGuard>
-
                   {/* Category */}
                   <FeatureGuard id="category">
                     <div className="grid grid-cols-3 items-center gap-4">

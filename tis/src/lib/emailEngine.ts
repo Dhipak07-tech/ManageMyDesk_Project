@@ -199,17 +199,60 @@ export async function processEmailQueue() {
         continue;
       }
       const config = configs[0];
-      const transporter = nodemailer.createTransport({
-        host: config.smtp_host, port: config.smtp_port, secure: config.smtp_port === 465,
-        auth: { user: config.smtp_user, pass: config.smtp_pass },
-        tls: { rejectUnauthorized: false }
-      });
+      let transporter;
+      let fromAddress = `"${config.company_name} Support" <${config.email_address}>`;
+      
+      try {
+        transporter = nodemailer.createTransport({
+          host: config.smtp_host, port: config.smtp_port, secure: config.smtp_port === 465,
+          auth: { user: config.smtp_user, pass: config.smtp_pass },
+          tls: { rejectUnauthorized: false }
+        });
+        await transporter.verify();
+      } catch (verifyErr) {
+        console.warn("[EmailQueue] Config transporter failed verification. Falling back to environment SMTP...", verifyErr);
+        transporter = nodemailer.createTransport({
+          host: process.env.SMTP_HOST || 'smtp.gmail.com',
+          port: parseInt(process.env.SMTP_PORT || '587'),
+          secure: process.env.SMTP_PORT === '465',
+          auth: {
+            user: process.env.SMTP_USER || 'swedhasris@gmail.com',
+            pass: process.env.SMTP_PASS || 'cqrt ncza ybrs mtdc',
+          },
+          tls: { rejectUnauthorized: false }
+        });
+        fromAddress = `"Technosprint Support" <${process.env.SMTP_USER || 'swedhasris@gmail.com'}>`;
+      }
 
-      const info = await transporter.sendMail({
-        from: `"${config.company_name} Support" <${config.email_address}>`,
-        to: job.recipient, subject: job.subject, html: job.body_html,
-        headers: job.ticket_number ? { 'X-Ticket-Number': job.ticket_number } : {}
-      });
+      let info;
+      try {
+        info = await transporter.sendMail({
+          from: fromAddress,
+          to: job.recipient, subject: job.subject, html: job.body_html,
+          headers: job.ticket_number ? { 'X-Ticket-Number': job.ticket_number } : {}
+        });
+      } catch (sendErr: any) {
+        if (sendErr.message?.includes('535') || sendErr.message?.includes('Authentication')) {
+          console.warn("[EmailQueue] Send failed due to auth error. Retrying with environment SMTP fallback...");
+          const fallbackTransporter = nodemailer.createTransport({
+            host: process.env.SMTP_HOST || 'smtp.gmail.com',
+            port: parseInt(process.env.SMTP_PORT || '587'),
+            secure: process.env.SMTP_PORT === '465',
+            auth: {
+              user: process.env.SMTP_USER || 'swedhasris@gmail.com',
+              pass: process.env.SMTP_PASS || 'cqrt ncza ybrs mtdc',
+            },
+            tls: { rejectUnauthorized: false }
+          });
+          info = await fallbackTransporter.sendMail({
+            from: `"Technosprint Support" <${process.env.SMTP_USER || 'swedhasris@gmail.com'}>`,
+            to: job.recipient, subject: job.subject, html: job.body_html,
+            headers: job.ticket_number ? { 'X-Ticket-Number': job.ticket_number } : {}
+          });
+        } else {
+          throw sendErr;
+        }
+      }
 
       await execute("UPDATE notifications_queue SET status = 'sent', processed_at = datetime('now') WHERE id = ?", [job.id]);
       await logEmail({

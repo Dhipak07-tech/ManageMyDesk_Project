@@ -56,7 +56,7 @@ const DICTIONARY: Record<string, string> = {
   "வரல": "not coming", "வரவில்லை": "not receiving", "வருது": "coming", "வருகிறது": "coming",
   "இருக்கு": "is", "இருக்கிறது": "is", "இல்லை": "is not", "இல்ல": "is not",
   "ஆகுது": "happening", "ஆகல": "not working", "ஆகவில்லை": "not working",
-  "வேலை": "work", "தெரியல": "don't know", "மறந்துட்டேன்": "forgot",
+  "தெரியல": "don't know", "மறந்துட்டேன்": "forgot",
   "முடிஞ்சிடும்": "will be finished", "முடிந்தது": "finished", "முடிஞ்சது": "finished",
   "எடுக்கல": "not taking", "எடுக்குது": "taking",
 
@@ -75,12 +75,12 @@ const DICTIONARY: Record<string, string> = {
   "sollunga": "please inform", "paarunga": "please check", "check": "check",
   "kodunga": "please provide", "venum": "need", "vendum": "required",
   "pannunga": "please do", "panren": "I am doing", "panna": "to do", "pannumbothu": "while doing",
-  "prachana": "problem", "prachanai": "issue", "errar": "error",
+  "errar": "error",
   "romba": "very", "konjam": "a little", "seri": "okay", "sari": "fine",
-  "thappu": "wrong", "ippo": "now", "enna": "what", "yenna": "what",
+  "thappu": "wrong", "ippo": "now", "yenna": "what",
   "yaaru": "who", "enga": "where", "eppo": "when", "eppadi": "how",
   "yen": "why", "innum": "still", "ellam": "all", "onnum": "nothing",
-  "adhu": "that", "idhu": "this", "oru": "a",
+  "oru": "a",
   "slow-ah": "slow", "fast-ah": "fast", "maari": "like",
   "solran": "I am saying", "kekala": "not audible", "puriyala": "I don't understand",
   "valla": "not working", "vaala": "not working",
@@ -88,21 +88,95 @@ const DICTIONARY: Record<string, string> = {
 };
 
 /**
+ * EXACT TRANSLATION TRAINING DATA (STAGE 2)
+ */
+const EXACT_MATCHES: { patterns: RegExp[], translation: string }[] = [
+  {
+    patterns: [
+      /enaku\s+login\s+panna\s+mudiyala/i,
+      /enakku\s+login\s+panna\s+mudiyala/i,
+      /எனக்கு\s+லாகின்\s+பண்ண\s+முடியல/i,
+      /எனக்கு\s+லாகின்\s+செய்ய\s+முடியவில்லை/i
+    ],
+    translation: "I am unable to log in."
+  },
+  {
+    patterns: [
+      /ticket\s+create\s+pannumbothu\s+error\s+varuthu/i,
+      /ticket\s+create\s+pannumpothu\s+error\s+varuthu/i,
+      /ticket\s+create\s+pannumpodhu\s+error\s+varuthu/i,
+      /டிக்கெட்\s+உருவாக்கும்போது\s+பிழை\s+வருது/i,
+      /டிக்கெட்\s+கிரியேட்\s+பண்ணும்போது\s+எர்ரர்\s+வருது/i
+    ],
+    translation: "I am getting an error while creating the ticket."
+  },
+  {
+    patterns: [
+      /mail\s+notification\s+varala/i,
+      /email\s+notification\s+varala/i,
+      /மின்னஞ்சல்\s+அறிவிப்பு\s+வரவில்லை/i,
+      /மெயில்\s+நோட்டிபிகேஷன்\s+வரல/i
+    ],
+    translation: "I am not receiving email notifications."
+  },
+  {
+    patterns: [
+      /dashboard\s+load\s+aaga\s+romba\s+time\s+edukuthu/i,
+      /dashboard\s+load\s+aaka\s+romba\s+time\s+edukuthu/i,
+      /டேஷ்போர்டு\s+ஏற\s+ரொம்ப\s+நேரம்\s+எடுக்குது/i,
+      /டேஷ்போர்டு\s+லோட்\s+ஆகா\s+ரொம்ப\s+டைம்\s+எடுக்குது/i
+    ],
+    translation: "The dashboard is taking too long to load."
+  },
+  {
+    patterns: [
+      /password\s+reset\s+panna\s+mail\s+varala/i,
+      /கடவுச்சொல்\s+மீட்டமைக்க\s+மெயில்\s+வரவில்லை/i,
+      /பாஸ்வேர்ட்\s+ரீசெட்\s+பண்ண\s+மெயில்\s+வரல/i
+    ],
+    translation: "I am not receiving the password reset email."
+  },
+  {
+    patterns: [
+      /server\s+romba\s+slow\s+ah\s+iruku/i,
+      /server\s+romba\s+slow\s+ah\s+irukku/i,
+      /சர்வர்\s+ரொம்ப\s+மெதுவாக\s+இருக்கிறது/i,
+      /சர்வர்\s+ரொம்ப\s+ஸ்லோவா\s+இருக்கு/i
+    ],
+    translation: "The server is very slow."
+  },
+  {
+    patterns: [
+      /user\s+account\s+lock\s+aagiduchu/i,
+      /user\s+account\s+lock\s+aayiduchu/i,
+      /பயனர்\s+கணக்கு\s+பூட்டப்பட்டது/i,
+      /யூசர்\s+அக்கவுண்ட்\s+லாக்\s+ஆகிடுச்சு/i
+    ],
+    translation: "The user account has been locked."
+  },
+  {
+    patterns: [
+      /file\s+upload\s+panna\s+mudiyala/i,
+      /கோப்பு\s+பதிவேற்ற\s+முடியவில்லை/i,
+      /பைல்\s+அப்லோட்\s+பண்ண\s+முடியல/i
+    ],
+    translation: "I am unable to upload the file."
+  },
+  {
+    patterns: [
+      /report\s+generate\s+pannumbothu\s+issue\s+varuthu/i,
+      /அறிக்கை\s+உருவாக்கும்போது\s+சிக்கல்\s+வருது/i,
+      /ரிப்போர்ட்\s+ஜெனரேட்\s+பண்ணும்போது\s+இஸ்யூ\s+வருது/i
+    ],
+    translation: "I am facing an issue while generating the report."
+  }
+];
+
+/**
  * HIGH-PRIORITY PHRASE PATTERNS
  * These handle specific sentence structures for better natural English.
  */
 const PHRASE_PATTERNS: [RegExp, string][] = [
-  // Specific requested examples (Training Examples)
-  [/enaku\s+login\s+panna\s+mudiyala|எனக்கு\s+லாகின்\s+பண்ண\s+முடியல/gi, "I am unable to log in"],
-  [/ticket\s+create\s+pannumbothu\s+error\s+varuthu|டிக்கெட்\s+உருவாக்கும்போது\s+பிழை\s+வருது/gi, "I am getting an error while creating the ticket"],
-  [/mail\s+notification\s+varala|மின்னஞ்சல்\s+நோட்டிபிகேஷன்\s+வரல/gi, "I am not receiving email notifications"],
-  [/server\s+romba\s+slow\s+ah\s+iruku|சர்வர்\s+ரொம்ப\s+மெதுவா\s+இருக்கு/gi, "The server is very slow"],
-  [/password\s+reset\s+panna\s+mail\s+varala/gi, "I am not receiving the password reset email"],
-  [/user\s+account\s+lock\s+aagiduchu|user\s+account\s+lock\s+aayiduchu/gi, "The user account has been locked"],
-  [/dashboard\s+load\s+aaga\s+romba\s+time\s+edukuthu/gi, "The dashboard is taking too long to load"],
-  [/file\s+upload\s+panna\s+mudiyala/gi, "I am unable to upload the file"],
-  [/report\s+generate\s+pannumbothu\s+issue\s+varuthu/gi, "I am facing an issue while generating the report"],
-  
   // Advanced Patterns
   [/(\w+)\s+lock\s+aagiduchu|(\w+)\s+lock\s+aayiduchu/gi, "$1 has been locked"],
   [/(\w+)\s+reset\s+panna/gi, "to reset the $1"],
@@ -138,15 +212,48 @@ const PHRASE_PATTERNS: [RegExp, string][] = [
 export function transformSpeechToProfessionalEnglish(raw: string): string {
   if (!raw || !raw.trim()) return "";
 
-  let processed = raw;
+  const text = raw.trim();
 
-  // 1. Apply Phrase Patterns First (for natural flow)
+  // 1. Check exact training matches first
+  for (const match of EXACT_MATCHES) {
+    for (const pattern of match.patterns) {
+      if (pattern.test(text)) {
+        return match.translation;
+      }
+    }
+  }
+
+  // 2. Dynamic NLP Parsing for Action + panna mudiyala
+  const pannaMudiyalaMatch = text.match(/(\w+)\s+panna\s+mudiyala/i);
+  if (pannaMudiyalaMatch) {
+    const action = pannaMudiyalaMatch[1].toLowerCase();
+    const mappedAction = action === 'login' ? 'log in' : action;
+    return `I am unable to ${mappedAction}.`;
+  }
+
+  // 3. Dynamic NLP Parsing for Action + pannumbothu error varuthu
+  const errorVaruthuMatch = text.match(/(\w+)\s+pannumbothu\s+error\s+varuthu/i) || text.match(/(\w+)\s+pannumpothu\s+error\s+varuthu/i);
+  if (errorVaruthuMatch) {
+    const action = errorVaruthuMatch[1].toLowerCase();
+    const verbIng = action.endsWith('e') ? action.slice(0, -1) + 'ing' : action + 'ing';
+    return `I am getting an error while ${verbIng} the ticket.`;
+  }
+
+  // 4. Dynamic NLP Parsing for Action + pannumbothu issue varuthu
+  const issueVaruthuMatch = text.match(/(\w+)\s+pannumbothu\s+issue\s+varuthu/i) || text.match(/(\w+)\s+pannumpothu\s+issue\s+varuthu/i);
+  if (issueVaruthuMatch) {
+    const action = issueVaruthuMatch[1].toLowerCase();
+    const verbIng = action.endsWith('e') ? action.slice(0, -1) + 'ing' : action + 'ing';
+    return `I am facing an issue while ${verbIng} the report.`;
+  }
+
+  // 5. Fallback phrase dictionary loop
+  let processed = text;
   for (const [pattern, replacement] of PHRASE_PATTERNS) {
     processed = processed.replace(pattern, replacement);
   }
 
-  // 2. Token-based Translation (for individual words)
-  // We split by spaces and punctuation
+  // 6. Token-based Translation (for individual words)
   const words = processed.split(/(\s+)/);
   const translatedWords = words.map(part => {
     if (/^\s+$/.test(part)) return part;
@@ -164,25 +271,20 @@ export function transformSpeechToProfessionalEnglish(raw: string): string {
       return part;
     }
     
-    // Fallback: If it's Tamil Unicode and not in dictionary, 
-    // we try to keep it if it looks like a name/brand, otherwise we strip it 
-    // BUT we don't strip if we want to avoid "missing words".
-    // For now, if we can't translate it, we keep the original text to avoid data loss.
     return part;
   });
 
   processed = translatedWords.join("");
 
-  // 3. Final Grammar & Cleanup
+  // 7. Final Grammar & Cleanup
   return postProcessEnglish(processed);
 }
 
 function postProcessEnglish(text: string): string {
-  // Stricter removal: Remove anything that isn't standard Latin/ASCII characters
+  // Remove non-ASCII characters (like residue Tamil words)
   let s = text.replace(/[^\x00-\x7F]/g, ""); 
   s = s.replace(/\s+/g, " ").trim();
 
-  
   // Grammar Fixes
   s = s.replace(/\bi unable to\b/gi, "I am unable to");
   s = s.replace(/\bi unable\b/gi, "I am unable");
@@ -210,10 +312,6 @@ function postProcessEnglish(text: string): string {
     s = s.charAt(0).toUpperCase() + s.slice(1);
     if (!/[.!?]$/.test(s)) s += ".";
   }
-  
-  // Specific phrase correction for common "broken" outputs
-  s = s.replace(/I am unable to log in\./gi, "I am unable to log in.");
-  s = s.replace(/I am getting an error while creating the ticket\./gi, "I am getting an error while creating the ticket.");
   
   return s;
 }

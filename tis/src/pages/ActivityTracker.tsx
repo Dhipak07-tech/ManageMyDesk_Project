@@ -245,7 +245,9 @@ export function ActivityTracker() {
   const {
     status, entries, elapsed, summary, error,
     startWatcher, stopWatcher, setEntries, setSummary, setError,
-    intervalSec, setIntervalSec, captureScreenshots, setCaptureScreenshots
+    intervalSec, setIntervalSec, captureScreenshots, setCaptureScreenshots,
+    selectedFrequency, setSelectedFrequency,
+    customIntervalInput, setCustomIntervalInput
   } = useActivityTracker();
 
   const [showSettings, setShowSettings] = useState(false);
@@ -342,6 +344,45 @@ export function ActivityTracker() {
                 ))}
               </div>
             </div>
+            <div>
+              <h3 className="text-sm font-bold mb-2">Screenshot Capture Frequency</h3>
+              <select
+                value={selectedFrequency}
+                onChange={e => setSelectedFrequency(e.target.value)}
+                disabled={isActive}
+                className="w-full max-w-xs p-2 border border-border rounded-lg text-sm bg-white outline-none focus:ring-1 focus:ring-blue-600 disabled:opacity-50"
+              >
+                <option value="5">Every 5 seconds</option>
+                <option value="10">Every 10 seconds</option>
+                <option value="15">Every 15 seconds</option>
+                <option value="30">Every 30 seconds</option>
+                <option value="60">Every 1 minute</option>
+                <option value="120">Every 2 minutes</option>
+                <option value="300">Every 5 minutes</option>
+                <option value="custom">Custom</option>
+              </select>
+            </div>
+
+            {selectedFrequency === 'custom' && (
+              <div className="space-y-1.5">
+                <h3 className="text-sm font-bold">Custom Interval (Seconds)</h3>
+                <input
+                  type="number"
+                  value={customIntervalInput}
+                  onChange={e => setCustomIntervalInput(e.target.value)}
+                  disabled={isActive}
+                  placeholder="Enter time in seconds"
+                  className="w-full max-w-xs p-2 border border-border rounded-lg text-sm bg-white outline-none focus:ring-1 focus:ring-blue-600 disabled:opacity-50"
+                />
+                {(() => {
+                  const val = parseInt(customIntervalInput, 10);
+                  const hasError = isNaN(val) || val < 5 || val > 3600;
+                  return hasError ? (
+                    <p className="text-xs text-red-500 font-semibold">Please enter a value between 5 and 3600 seconds</p>
+                  ) : null;
+                })()}
+              </div>
+            )}
             <div className="flex items-center gap-3">
               <input type="checkbox" id="capScreenshots" checked={captureScreenshots} onChange={e => setCaptureScreenshots(e.target.checked)} disabled={isActive} className="w-4 h-4 accent-blue-600" />
               <label htmlFor="capScreenshots" className="text-sm font-medium cursor-pointer">
