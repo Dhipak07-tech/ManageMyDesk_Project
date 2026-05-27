@@ -43,6 +43,7 @@ CREATE TABLE IF NOT EXISTS tickets (
     affected_user VARCHAR(255),
     affected_user_id VARCHAR(128),
     category VARCHAR(100),
+    incident_category VARCHAR(100) NULL,
     subcategory VARCHAR(100),
     service VARCHAR(100),
     service_offering VARCHAR(100),
@@ -445,3 +446,19 @@ INSERT INTO system_settings (setting_key, setting_value, setting_type, descripti
 ('enable_email_notifications', 'false', 'boolean', 'Enable email notifications'),
 ('company_name', 'Connect IT', 'string', 'Company name displayed in portal'),
 ('maintenance_mode', 'false', 'boolean', 'Enable maintenance mode');
+
+-- ============================================================
+-- INCIDENT CATEGORIES TABLE
+-- ============================================================
+CREATE TABLE IF NOT EXISTS incident_categories (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    name VARCHAR(100) UNIQUE NOT NULL,
+    description TEXT,
+    status ENUM('Active', 'Inactive') DEFAULT 'Active',
+    created_by VARCHAR(255),
+    created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    last_updated_by VARCHAR(255),
+    last_updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    INDEX idx_name (name),
+    INDEX idx_status (status)
+) ENGINE=InnoDB;

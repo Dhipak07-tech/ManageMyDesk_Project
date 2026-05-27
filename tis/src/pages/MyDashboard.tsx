@@ -1,12 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Link } from "react-router-dom";
-import AnalyticsCard from "../components/AnalyticsCard";
-import PerformanceMetric from "../components/PerformanceMetric";
-import AnalyticsChart from "../components/AnalyticsChart";
-import RecentActivityList from "../components/RecentActivityList";
-import MyTasksList from "../components/MyTasksList";
-import QuickActions from "../components/QuickActions";
+import AnalyticsCard from "../../../src/components/AnalyticsCard";
+import PerformanceMetric from "../../../src/components/PerformanceMetric";
+import AnalyticsChart from "../../../src/components/AnalyticsChart";
+import RecentActivityList from "../../../src/components/RecentActivityList";
+import MyTasksList from "../../../src/components/MyTasksList";
+import QuickActions from "../../../src/components/QuickActions";
 import { db } from "../lib/firebase";
 import { collection, query, onSnapshot } from "firebase/firestore";
 

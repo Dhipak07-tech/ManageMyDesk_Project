@@ -286,7 +286,7 @@ export function Dashboard() {
                     <td className="p-3">
                       <span className="text-[11px] font-medium">{t.status ?? "New"}</span>
                     </td>
-                    <td className="p-3 text-[11px] text-muted-foreground">{t.category ?? "—"}</td>
+                    <td className="p-3 text-[11px] text-muted-foreground">{t.incidentCategory || t.incident_category || t.category || "—"}</td>
                     <td className="p-3 text-[11px] font-medium">
                       {t.assignedToName || users.find(u => u.id === t.assignedTo)?.name || t.assignedTo || "Unassigned"}
                     </td>

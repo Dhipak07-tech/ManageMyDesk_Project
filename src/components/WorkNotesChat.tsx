@@ -104,6 +104,7 @@ function ChatBubble({
 }: {
   msg: WorkNoteMessage;
   onPreviewClick: (src: string) => void;
+  key?: React.Key;
 }) {
   const isStart = msg.type === 'start';
   // Use base64 preview if available (just captured), otherwise use server URL

@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { firebaseAvailable, db } from "../lib/firebase";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
-import { db } from "../lib/firebase";
 import { useAuth } from "./AuthContext";
 
 interface Ticket {
@@ -35,7 +35,7 @@ export function useTickets() {
 export function TicketsProvider({ children }: { children: React.ReactNode }) {
   const { user, profile } = useAuth();
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -44,34 +44,46 @@ export function TicketsProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    // If Firebase is not available, skip Firestore and use empty state
+    if (!firebaseAvailable) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
 
-    const ticketsRef = collection(db, "tickets");
+    let unsubscribe: (() => void) | null = null;
 
-    // All users (including regular users) see all open tickets
-    const q = query(ticketsRef, where("status", "not-in", ["Resolved", "Closed"]));
+    try {
+      const ticketsRef = collection(db, "tickets");
+      const q = query(ticketsRef, where("status", "not-in", ["Resolved", "Closed"]));
 
-    const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const ticketsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ticket));
-        setTickets(ticketsData);
-        setLoading(false);
-      },
-      (err) => {
-        console.error("Error fetching tickets:", err);
-        setError(err.message);
-        setLoading(false);
-      }
-    );
+      unsubscribe = onSnapshot(
+        q,
+        (snapshot) => {
+          const ticketsData = snapshot.docs.map(d => ({ id: d.id, ...d.data() } as Ticket));
+          setTickets(ticketsData);
+          setLoading(false);
+        },
+        (err) => {
+          // Non-fatal: Firestore errors should not crash the app
+          console.warn("[TicketsContext] Firestore error (non-fatal):", err.message);
+          setError(null); // Don't surface as an error to the UI
+          setLoading(false);
+        }
+      );
+    } catch (e: any) {
+      console.warn("[TicketsContext] Failed to subscribe to tickets:", e.message);
+      setLoading(false);
+    }
 
-    return unsubscribe;
+    return () => { if (unsubscribe) unsubscribe(); };
   }, [user, profile]);
 
   const openTicketsCount = tickets.length;
-  const assignedToMeCount = tickets.filter(t => 
-    t.assignedTo === user?.uid || 
+  const assignedToMeCount = tickets.filter(t =>
+    t.assignedTo === user?.uid ||
     t.assignedTo === profile?.name
   ).length;
 

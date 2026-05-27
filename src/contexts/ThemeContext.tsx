@@ -6,6 +6,8 @@ interface ThemeContextType {
   theme: Theme;
   setTheme: (theme: Theme) => void;
   resolvedTheme: "light" | "dark";
+  lightBrightness: number;
+  setLightBrightness: (brightness: number) => void;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -17,6 +19,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   });
 
   const [resolvedTheme, setResolvedTheme] = useState<"light" | "dark">("light");
+
+  const [lightBrightness, setLightBrightnessState] = useState<number>(() => {
+    const saved = localStorage.getItem("light-brightness");
+    return saved ? Number(saved) : 97;
+  });
 
   useEffect(() => {
     const root = document.documentElement;
@@ -38,10 +45,14 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       } else {
         root.classList.remove("dark");
       }
+
+      // Apply adjustable light brightness CSS variable
+      root.style.setProperty('--light-brightness', `${lightBrightness}%`);
     };
 
     updateTheme();
     localStorage.setItem("theme", theme);
+    localStorage.setItem("light-brightness", lightBrightness.toString());
 
     // Listen for system theme changes
     const handleChange = (e: MediaQueryListEvent) => {
@@ -52,14 +63,18 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
     mediaQuery.addEventListener("change", handleChange);
     return () => mediaQuery.removeEventListener("change", handleChange);
-  }, [theme]);
+  }, [theme, lightBrightness]);
 
   const setTheme = (newTheme: Theme) => {
     setThemeState(newTheme);
   };
 
+  const setLightBrightness = (brightness: number) => {
+    setLightBrightnessState(brightness);
+  };
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme }}>
+    <ThemeContext.Provider value={{ theme, setTheme, resolvedTheme, lightBrightness, setLightBrightness }}>
       {children}
     </ThemeContext.Provider>
   );

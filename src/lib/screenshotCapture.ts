@@ -144,9 +144,9 @@ export async function captureScreenshot(context: ScreenshotContext): Promise<Cap
     let width: number;
     let height: number;
 
-    if (typeof ImageCapture !== 'undefined') {
+    if (typeof (window as any).ImageCapture !== 'undefined') {
       // ── Primary path: ImageCapture API (Chrome, Edge) ──
-      const imageCapture = new ImageCapture(track);
+      const imageCapture = new (window as any).ImageCapture(track);
       const bitmap = await imageCapture.grabFrame();
       width = bitmap.width;
       height = bitmap.height;

@@ -49,6 +49,7 @@ const ClearUsers = lazy(() => import("./pages/ClearUsers").then(m => ({ default:
 const BrandingSettings = lazy(() => import("./pages/BrandingSettings").then(m => ({ default: m.BrandingSettings })));
 const ActivityTracker = lazy(() => import("./pages/ActivityTracker").then(m => ({ default: m.ActivityTracker })));
 const DataAnalytics = lazy(() => import("./pages/DataAnalytics").then(m => ({ default: m.DataAnalytics })));
+const IncidentCategoryManagement = lazy(() => import("./pages/IncidentCategoryManagement").then(m => ({ default: m.IncidentCategoryManagement })));
 
 function LoadingScreen() {
   return (
@@ -180,6 +181,14 @@ function AppBody() {
             element={
               <ProtectedRoute>
                 <Users />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incident-categories"
+            element={
+              <ProtectedRoute>
+                <IncidentCategoryManagement />
               </ProtectedRoute>
             }
           />

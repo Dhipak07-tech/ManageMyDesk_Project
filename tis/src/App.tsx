@@ -15,6 +15,8 @@ import { ROLE_HIERARCHY, Role } from "./lib/roles";
 
 // Lazy loaded components
 const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
+const MyDashboard = lazy(() => import("./pages/MyDashboard").then(m => ({ default: m.MyDashboard })));
+const DataAnalytics = lazy(() => import("./pages/DataAnalytics").then(m => ({ default: m.DataAnalytics })));
 
 const Tickets = lazy(() => import("./pages/Tickets").then(m => ({ default: m.Tickets })));
 const TicketDetail = lazy(() => import("./pages/TicketDetail").then(m => ({ default: m.TicketDetail })));
@@ -48,6 +50,7 @@ const BrandingSettings = lazy(() => import("./pages/BrandingSettings").then(m =>
 const ActivityTracker = lazy(() => import("./pages/ActivityTracker").then(m => ({ default: m.ActivityTracker })));
 const CustomDropdownManager = lazy(() => import("./pages/CustomDropdownManager").then(m => ({ default: m.CustomDropdownManager })));
 const EmailIntegrations = lazy(() => import("./pages/EmailIntegrations").then(m => ({ default: m.EmailIntegrations })));
+const IncidentCategoryManagement = lazy(() => import("./pages/IncidentCategoryManagement").then(m => ({ default: m.IncidentCategoryManagement })));
 
 
 function LoadingScreen() {
@@ -125,6 +128,22 @@ function AppBody() {
             }
           />
           <Route
+            path="/my-dashboard"
+            element={
+              <ProtectedRoute>
+                <MyDashboard />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/data-analytics"
+            element={
+              <ProtectedRoute>
+                <DataAnalytics />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/tickets"
             element={
               <ProtectedRoute>
@@ -169,6 +188,14 @@ function AppBody() {
             element={
               <ProtectedRoute>
                 <Users />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/incident-categories"
+            element={
+              <ProtectedRoute>
+                <IncidentCategoryManagement />
               </ProtectedRoute>
             }
           />
@@ -290,9 +317,6 @@ function AppBody() {
               <ProtectedRoute>
                 <AccessControl />
               </ProtectedRoute>
-            }
-          />
-          <Route
             }
           />
           <Route

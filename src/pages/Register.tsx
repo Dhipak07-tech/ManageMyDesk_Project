@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { doc, setDoc, serverTimestamp, getDocs, collection, query, where } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { db, firebaseAvailable } from "../lib/firebase";
 import { Link, useNavigate } from "react-router-dom";
 import { Eye, EyeOff, UserPlus, Mail, Lock, Phone, ShieldCheck, User } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -66,6 +66,10 @@ export function Register() {
 
     setIsLoading(true);
     try {
+      if (!firebaseAvailable) {
+        throw new Error("Registration is unavailable because Firebase is not configured.");
+      }
+
       // Check if email already exists
       const usersRef = collection(db, "users");
       const q = query(usersRef, where("email", "==", email.toLowerCase().trim()));

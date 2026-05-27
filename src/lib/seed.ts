@@ -1,7 +1,13 @@
+import { firebaseAvailable, db } from "./firebase";
 import { collection, getDocs, addDoc, query, limit, setDoc, doc } from "firebase/firestore";
-import { db } from "./firebase";
 
 export async function seedInitialData() {
+  // Skip seeding if Firebase is not configured
+  if (!firebaseAvailable) {
+    console.log("[Seed] Firebase not available — skipping Firestore seed.");
+    return;
+  }
+
   try {
     const slaRef = collection(db, "sla_policies");
     const snapshot = await getDocs(query(slaRef, limit(1)));

@@ -295,7 +295,151 @@ export function ActivityTracker() {
   }, [user]);
 
   const handleStart = startWatcher;
-  const handleStop = stopWatcher;
+
+  const [showSessionPopup, setShowSessionPopup] = useState(false);
+  const [sessionForm, setSessionForm] = useState({
+    entryDate: "",
+    startTime: "",
+    endTime: "",
+    minutesWorked: 0,
+    task: "General Support",
+    customTask: "",
+    workType: "Support",
+    shortDescription: "",
+    description: "",
+    notes: "",
+    billable: "Billable"
+  });
+  const [savingSession, setSavingSession] = useState(false);
+
+  const updateDuration = (startStr: string, endStr: string) => {
+    const parseTime = (timeStr: string) => {
+      const match = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+      if (!match) return null;
+      return { h: parseInt(match[1]), m: parseInt(match[2]) };
+    };
+
+    const s = parseTime(startStr);
+    const e = parseTime(endStr);
+
+    if (s && e) {
+      const startMinutes = s.h * 60 + s.m;
+      const endMinutes = e.h * 60 + e.m;
+      let diff = endMinutes - startMinutes;
+      if (diff < 0) {
+        diff += 24 * 60; // Next day overflow
+      }
+      setSessionForm(f => ({ ...f, minutesWorked: diff }));
+    }
+  };
+
+  const handleStop = async () => {
+    if (!isActive) return;
+
+    const now = new Date();
+    const startMs = Date.now() - (elapsed * 1000);
+    const start = new Date(startMs);
+    const calculatedMinutes = Math.max(1, Math.round(elapsed / 60));
+
+    const pad = (n: number) => String(n).padStart(2, '0');
+    const formatTimeForInput = (d: Date) => `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const formatDateForInput = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
+    const initialStart = formatTimeForInput(start);
+    const initialEnd = formatTimeForInput(now);
+    const initialDate = formatDateForInput(now);
+
+    await stopWatcher();
+
+    setSessionForm({
+      entryDate: initialDate,
+      startTime: initialStart,
+      endTime: initialEnd,
+      minutesWorked: calculatedMinutes,
+      task: "General Support",
+      customTask: "",
+      workType: "Support",
+      shortDescription: "",
+      description: "",
+      notes: "",
+      billable: "Billable"
+    });
+
+    setShowSessionPopup(true);
+  };
+
+  useEffect(() => {
+    if (summary && showSessionPopup) {
+      setSessionForm(f => ({ ...f, description: summary }));
+    }
+  }, [summary, showSessionPopup]);
+
+  const handleSaveSession = async () => {
+    if (!user) return;
+    if (!sessionForm.shortDescription.trim()) {
+      alert("Short Description is required.");
+      return;
+    }
+
+    setSavingSession(true);
+    try {
+      const userId = user.uid;
+      const finalTask = sessionForm.task === "Other..." ? sessionForm.customTask : sessionForm.task;
+
+      const entryD = new Date(sessionForm.entryDate + "T12:00:00");
+      const day = entryD.getDay();
+      const diff = entryD.getDate() - day + (day === 0 ? -6 : 1);
+      const mon = new Date(entryD);
+      mon.setDate(diff);
+      const monStr = mon.toISOString().split("T")[0];
+      const sun = new Date(mon.getTime() + 6 * 86400000);
+      const sunStr = sun.toISOString().split("T")[0];
+
+      const tsRes = await fetch("/api/timesheets/get-or-create", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id: userId,
+          week_start: monStr,
+          week_end: sunStr
+        })
+      });
+      const ts = await tsRes.json();
+
+      const response = await fetch("/api/time-cards", {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          timesheet_id: ts.id,
+          user_id: userId,
+          entry_date: sessionForm.entryDate,
+          start_time: sessionForm.startTime,
+          end_time: sessionForm.endTime,
+          hours_worked: sessionForm.minutesWorked,
+          task: finalTask,
+          work_type: sessionForm.workType,
+          billable: sessionForm.billable,
+          description: sessionForm.description,
+          short_description: sessionForm.shortDescription,
+          notes: sessionForm.notes,
+          status: 'Draft'
+        })
+      });
+
+      if (response.ok) {
+        alert("Session activity details saved successfully! Calendar entry created.");
+        setShowSessionPopup(false);
+        setSummary(null);
+      } else {
+        alert("Failed to save activity details.");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error saving session details.");
+    } finally {
+      setSavingSession(false);
+    }
+  };
 
   useEffect(() => {
     // Sync local state if needed (mostly just for the interval display)
@@ -522,6 +666,242 @@ export function ActivityTracker() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+        )}
+
+        {/* Activity Details Popup Modal */}
+        {showSessionPopup && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/55 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl border border-border shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="px-6 py-4 bg-slate-50 border-b border-border flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Bot className="w-5 h-5 text-blue-600" />
+                  <h2 className="text-base font-bold text-slate-800">Save AI Activity Details</h2>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSessionPopup(false)}
+                  className="text-slate-400 hover:text-slate-600 text-xl font-bold p-1 rounded hover:bg-slate-100 transition-colors"
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="p-6 space-y-4 overflow-y-auto flex-1 text-left">
+                {/* Date */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Activity Date
+                  </label>
+                  <input
+                    type="date"
+                    value={sessionForm.entryDate}
+                    onChange={e => setSessionForm(f => ({ ...f, entryDate: e.target.value }))}
+                    className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  />
+                </div>
+
+                {/* Start Time & End Time & Duration */}
+                <div className="grid grid-cols-3 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Start Time
+                    </label>
+                    <input
+                      type="time"
+                      value={sessionForm.startTime}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setSessionForm(f => ({ ...f, startTime: val }));
+                        updateDuration(val, sessionForm.endTime);
+                      }}
+                      className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      End Time
+                    </label>
+                    <input
+                      type="time"
+                      value={sessionForm.endTime}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setSessionForm(f => ({ ...f, endTime: val }));
+                        updateDuration(sessionForm.startTime, val);
+                      }}
+                      className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Duration (Mins)
+                    </label>
+                    <input
+                      type="number"
+                      value={sessionForm.minutesWorked}
+                      onChange={e => setSessionForm(f => ({ ...f, minutesWorked: parseInt(e.target.value) || 0 }))}
+                      className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    />
+                  </div>
+                </div>
+
+                {/* Task / Work Type Dropdown */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Task / Work Type
+                  </label>
+                  <select
+                    value={sessionForm.task}
+                    onChange={e => setSessionForm(f => ({ ...f, task: e.target.value }))}
+                    className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  >
+                    <option value="Ticket Resolution">Ticket Resolution</option>
+                    <option value="Documentation">Documentation</option>
+                    <option value="System Maintenance">System Maintenance</option>
+                    <option value="Meeting">Meeting</option>
+                    <option value="General Support">General Support</option>
+                    <option value="Other...">Other...</option>
+                  </select>
+                </div>
+
+                {/* Custom Task type input if Other chosen */}
+                {sessionForm.task === "Other..." && (
+                  <div className="animate-in slide-in-from-top-2 duration-150">
+                    <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                      Custom Work Type
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Specify your custom task/work type..."
+                      value={sessionForm.customTask}
+                      onChange={e => setSessionForm(f => ({ ...f, customTask: e.target.value }))}
+                      className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                    />
+                  </div>
+                )}
+
+                {/* Activity Category Dropdown */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Activity Category
+                  </label>
+                  <select
+                    value={sessionForm.workType}
+                    onChange={e => setSessionForm(f => ({ ...f, workType: e.target.value }))}
+                    className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  >
+                    <option value="Development">Development</option>
+                    <option value="Testing">Testing</option>
+                    <option value="Support">Support</option>
+                    <option value="Management">Management</option>
+                    <option value="Design">Design</option>
+                    <option value="Other">Other</option>
+                  </select>
+                </div>
+
+                {/* Short Description */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    <span className="text-red-500 font-bold">*</span> Short Description
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Briefly explain what was done during this session..."
+                    value={sessionForm.shortDescription}
+                    onChange={e => setSessionForm(f => ({ ...f, shortDescription: e.target.value }))}
+                    className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white"
+                  />
+                </div>
+
+                {/* Detailed Description */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Detailed Description / Work Summary
+                  </label>
+                  <textarea
+                    rows={3}
+                    placeholder="Explain all tasks completed during this session..."
+                    value={sessionForm.description}
+                    onChange={e => setSessionForm(f => ({ ...f, description: e.target.value }))}
+                    className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white resize-none"
+                  />
+                </div>
+
+                {/* Notes */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-1">
+                    Optional Notes
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="Enter any additional notes..."
+                    value={sessionForm.notes}
+                    onChange={e => setSessionForm(f => ({ ...f, notes: e.target.value }))}
+                    className="w-full p-2 border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white resize-none"
+                  />
+                </div>
+
+                {/* Billable Status */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">
+                    Billable Status
+                  </label>
+                  <div className="flex gap-4">
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="billable"
+                        value="Billable"
+                        checked={sessionForm.billable === "Billable"}
+                        onChange={() => setSessionForm(f => ({ ...f, billable: "Billable" }))}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      Billable
+                    </label>
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-700 cursor-pointer">
+                      <input
+                        type="radio"
+                        name="billable"
+                        value="Non-Billable"
+                        checked={sessionForm.billable === "Non-Billable"}
+                        onChange={() => setSessionForm(f => ({ ...f, billable: "Non-Billable" }))}
+                        className="w-4 h-4 accent-blue-600"
+                      />
+                      Non-Billable
+                    </label>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-6 py-4 bg-slate-50 border-t border-border flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSessionPopup(false)}
+                  className="px-4 py-2 border border-border rounded-lg text-xs hover:bg-slate-100 transition-colors font-semibold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  disabled={savingSession}
+                  onClick={handleSaveSession}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center gap-1.5 shadow"
+                >
+                  {savingSession ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" /> Saving...
+                    </>
+                  ) : (
+                    <>Save & Create Event</>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
         )}

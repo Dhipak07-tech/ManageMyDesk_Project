@@ -37,16 +37,15 @@ import {
   Building2,
   KeyRound,
   Monitor,
+  Palette,
+  Tag,
 } from "lucide-react";
 import { Link, useLocation } from "react-router-dom";
 import { cn } from "@/lib/utils";
-import { db } from "../lib/firebase";
 import { useAuth } from "../contexts/AuthContext";
 import { useTickets } from "../contexts/TicketsContext";
 import { useBranding } from "../contexts/BrandingContext";
 import { useTheme } from "../contexts/ThemeContext";
-import { collection, query, where, onSnapshot } from "firebase/firestore";
-import { Palette } from "lucide-react";
 
 interface MenuItem {
   icon?: any;
@@ -168,6 +167,7 @@ export function Sidebar() {
         { icon: ClipboardList, label: "Ticket Approvals", path: "/timesheet-approvals" },
         { icon: CheckCircle2, label: "Approved Timesheets", path: "/timesheet/reports?status=Approved" },
         { icon: Palette, label: "Branding", path: "/branding", superAdminOnly: true },
+        { icon: Tag, label: "Incident Category Management", path: "/incident-categories" },
       ]
     }
   ];

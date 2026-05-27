@@ -57,6 +57,9 @@ export function Tickets() {
   const [slaPolicies, setSlaPolicies] = useState<any[]>([]);
   const [emailConfigs, setEmailConfigs] = useState<any[]>([]);
   const [allUsers, setAllUsers] = useState<any[]>([]);
+  const [incidentCategories, setIncidentCategories] = useState<string[]>([]);
+  const [dynamicFields, setDynamicFields] = useState<any[]>([]);
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
   const [callerSearch, setCallerSearch] = useState("");
   const [affectedSearch, setAffectedSearch] = useState("");
   const [showCallerResults, setShowCallerResults] = useState(false);
@@ -86,6 +89,42 @@ export function Tickets() {
       openModal();
     }
   }, [action]);
+
+  // Fetch active incident categories and options dynamically
+  useEffect(() => {
+    fetch("/api/incident-categories?active_only=true")
+      .then(r => r.json())
+      .then(async (data) => {
+        if (Array.isArray(data)) {
+          setIncidentCategories(data.map((c: any) => c.name));
+          setDynamicFields(data);
+
+          // Fetch options for each dynamic field
+          const optionsMap: Record<string, any[]> = {};
+          await Promise.all(
+            data.map(async (cat: any) => {
+              try {
+                const res = await fetch(`/api/incident-categories/options?category_id=${cat.id}&active_only=true`);
+                if (res.ok) {
+                  const opts = await res.json();
+                  optionsMap[cat.id] = opts;
+                }
+              } catch (e) {
+                console.error("Error loading options for category", cat.id, e);
+              }
+            })
+          );
+          setDynamicOptions(optionsMap);
+        }
+      })
+      .catch(() => {
+        setIncidentCategories([
+          "Hardware Issue", "Software Issue", "Network Issue", "System Access",
+          "Security Issue", "Login Problem", "Email Issue", "Performance Issue",
+          "Service Request", "Other"
+        ]);
+      });
+  }, []);
 
   useEffect(() => {
     const controller = createSpeechController({
@@ -168,7 +207,8 @@ export function Tickets() {
     additionalInformation: "",
     affectedUser: "",
     watchList: "",
-    company: ""
+    company: "",
+    incidentCategory: ""
   });
 
   const [assignedTo, setAssignedTo] = useState("");
@@ -363,7 +403,7 @@ export function Tickets() {
       matches(t.caller, columnFilters.caller) &&
       matches(t.priority, columnFilters.priority) &&
       matches(t.status, columnFilters.status) &&
-      matches(t.category, columnFilters.category) &&
+      (matches(t.category, columnFilters.category) || matches(t.incidentCategory || t.incident_category || "", columnFilters.category)) &&
       matches(t.assignmentGroup, columnFilters.assignmentGroup) &&
       matches(agents.find(a => a.id === t.assignedTo)?.name || t.assignedToName || t.assignedTo || "", columnFilters.assignedTo)
     );
@@ -438,6 +478,17 @@ export function Tickets() {
       return;
     }
 
+    const hasCategoryAccess = ["admin", "super_admin", "ultra_super_admin"].includes(profile?.role || "") ||
+      ["arun@technosprint.net", "ulter@technosprint.net", "admin@technosprint.net", "admin@connectit.local", "demo-admin@connectit.local", "demo-super_admin@connectit.local", "demo-ultra_super_admin@connectit.local"].includes(user?.email || profile?.email || "");
+    if (hasCategoryAccess) {
+      for (const field of dynamicFields) {
+        if (!newTicket.customFields?.[field.id]) {
+          alert(`Please select a value for: ${field.name}`);
+          return;
+        }
+      }
+    }
+
     // Required fields check (respecting dynamic feature permissions)
     const req = (id: string, value: any) => {
       const p = getFp(id);
@@ -508,6 +559,8 @@ export function Tickets() {
 
       const ticketData = {
         ...newTicket,
+        incidentCategory: hasCategoryAccess ? (newTicket.incidentCategory || null) : null,
+        incident_category: hasCategoryAccess ? (newTicket.incidentCategory || null) : null,
         customFields: customFieldValues,
         number: ticketNumber,
         assignmentGroup,
@@ -534,6 +587,19 @@ export function Tickets() {
 
       const docRef = await addDoc(collection(db, "tickets"), ticketData);
       console.log("Ticket created successfully with ID:", docRef.id);
+
+      // Save custom dynamic dropdown selections in database
+      if (newTicket.customFields && Object.keys(newTicket.customFields).length > 0) {
+        try {
+          await fetch(`/api/tickets/${docRef.id}/custom-fields`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ customFields: newTicket.customFields })
+          });
+        } catch (e) {
+          console.error("Error saving dynamic custom fields:", e);
+        }
+      }
 
       // Log creation to activity timeline (Unified Activity Stream)
       try {
@@ -591,7 +657,8 @@ export function Tickets() {
         additionalInformation: "",
         affectedUser: "",
         watchList: "",
-        company: ""
+        company: "",
+        incidentCategory: ""
       });
       setSpeechLiveText("");
     } catch (error: any) {
@@ -734,7 +801,16 @@ export function Tickets() {
                       </span>
                     </td>
                     <td className="p-2 text-[11px]">{ticket.status}</td>
-                    <td className="p-2 text-[11px]">{ticket.category}</td>
+                    <td className="p-2 text-[11px]">
+                      <div>{ticket.category}</div>
+                      {(ticket.incidentCategory || ticket.incident_category) && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-blue-50 text-blue-600 border border-blue-100">
+                            📌 {ticket.incidentCategory || ticket.incident_category}
+                          </span>
+                        </div>
+                      )}
+                    </td>
                     <td className="p-2 text-[11px]">{ticket.assignmentGroup || "(empty)"}</td>
                     <td className="p-2 text-[11px]">{assignedAgent?.name || ticket.assignedToName || ticket.assignedTo || "(empty)"}</td>
                     <td className="p-2">
@@ -996,6 +1072,55 @@ export function Tickets() {
                       </select>
                     </div>
                   </FeatureGuard>
+
+                  {/* Incident Category Dynamic Custom Dropdowns */}
+                  {(["admin", "super_admin", "ultra_super_admin"].includes(profile?.role || "") ||
+                    ["arun@technosprint.net", "ulter@technosprint.net", "admin@technosprint.net", "admin@connectit.local", "demo-admin@connectit.local", "demo-super_admin@connectit.local", "demo-ultra_super_admin@connectit.local"].includes(user?.email || profile?.email || "")) && (
+                    <>
+                      {dynamicFields.map((field) => {
+                        const fieldOptions = dynamicOptions[field.id] || [];
+                        return (
+                          <div key={field.id} className="grid grid-cols-3 items-center gap-4">
+                            <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
+                              <span className="text-red-500 font-bold">*</span> {field.name}
+                            </label>
+                            <select
+                              value={newTicket.customFields?.[field.id] || ""}
+                              onChange={e => {
+                                setNewTicket((prev: any) => ({
+                                  ...prev,
+                                  customFields: {
+                                    ...(prev.customFields || {}),
+                                    [field.id]: e.target.value
+                                  }
+                                }));
+                              }}
+                              className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8 bg-white"
+                              required
+                            >
+                              <option value="">Select {field.name}</option>
+                              {fieldOptions.map((opt: any) => (
+                                <option key={opt.id} value={opt.value_text}>{opt.value_text}</option>
+                              ))}
+                            </select>
+                          </div>
+                        );
+                      })}
+                      {dynamicFields.length === 0 && (
+                        <div className="grid grid-cols-3 items-center gap-4">
+                          <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
+                            Incident Category
+                          </label>
+                          <select
+                            disabled
+                            className="col-span-2 p-1.5 border border-border rounded text-xs outline-none h-8 bg-muted/20"
+                          >
+                            <option>No dynamic custom categories defined</option>
+                          </select>
+                        </div>
+                      )}
+                    </>
+                  )}
 
                   {/* Subcategory */}
                   <FeatureGuard id="subcategory">

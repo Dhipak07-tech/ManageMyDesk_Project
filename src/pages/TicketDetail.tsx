@@ -27,6 +27,9 @@ export function TicketDetail() {
   const [workNote, setWorkNote] = useState("");
   const [isUpdating, setIsUpdating] = useState(false);
   const [agents, setAgents] = useState<any[]>([]);
+  const [incidentCategories, setIncidentCategories] = useState<string[]>([]);
+  const [dynamicFields, setDynamicFields] = useState<any[]>([]);
+  const [dynamicOptions, setDynamicOptions] = useState<Record<string, any[]>>({});
 
   // Timer state
   const [isTimerRunning, setIsTimerRunning] = useState(false);
@@ -63,6 +66,39 @@ export function TicketDetail() {
         setAgents(usersList.filter((u: any) => ['agent', 'admin', 'sub_admin', 'super_admin', 'ultra_super_admin'].includes(u.role)));
       }).catch(() => { });
     });
+    // Fetch active incident categories and options dynamically
+    fetch("/api/incident-categories?active_only=true")
+      .then(r => r.json())
+      .then(async (data) => {
+        if (Array.isArray(data)) {
+          setIncidentCategories(data.map((c: any) => c.name));
+          setDynamicFields(data);
+
+          // Fetch options for each dynamic field
+          const optionsMap: Record<string, any[]> = {};
+          await Promise.all(
+            data.map(async (cat: any) => {
+              try {
+                const res = await fetch(`/api/incident-categories/options?category_id=${cat.id}&active_only=true`);
+                if (res.ok) {
+                  const opts = await res.json();
+                  optionsMap[cat.id] = opts;
+                }
+              } catch (e) {
+                console.error("Error loading options for category", cat.id, e);
+              }
+            })
+          );
+          setDynamicOptions(optionsMap);
+        }
+      })
+      .catch(() => {
+        setIncidentCategories([
+          "Hardware Issue", "Software Issue", "Network Issue", "System Access",
+          "Security Issue", "Login Problem", "Email Issue", "Performance Issue",
+          "Service Request", "Other"
+        ]);
+      });
   }, []);
 
   // DYNAMIC GROUP FILTERING: Only show users belonging to the selected group
@@ -128,6 +164,24 @@ export function TicketDetail() {
 
   useEffect(() => {
     if (!id) return;
+    fetch(`/api/tickets/${id}/custom-fields`)
+      .then(r => r.json())
+      .then(savedFields => {
+        if (savedFields && typeof savedFields === 'object') {
+          setEditedTicket((prev: any) => ({
+            ...prev,
+            customFields: {
+              ...(prev?.customFields || {}),
+              ...savedFields
+            }
+          }));
+        }
+      })
+      .catch(err => console.error("Error fetching custom fields mapping:", err));
+  }, [id]);
+
+  useEffect(() => {
+    if (!id) return;
     const q = query(collection(db, "tickets", id, "comments"), orderBy("createdAt", "asc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       setComments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
@@ -139,6 +193,18 @@ export function TicketDetail() {
 
   const handleUpdate = async () => {
     if (!id || !user || !editedTicket) return;
+
+    const hasCategoryAccess = ["admin", "super_admin", "ultra_super_admin"].includes(profile?.role || "") ||
+      ["arun@technosprint.net", "ulter@technosprint.net", "admin@technosprint.net", "admin@connectit.local", "demo-admin@connectit.local", "demo-super_admin@connectit.local", "demo-ultra_super_admin@connectit.local"].includes(user?.email || profile?.email || "");
+    if (hasCategoryAccess) {
+      for (const field of dynamicFields) {
+        if (!editedTicket?.customFields?.[field.id]) {
+          alert(`Please select a value for: ${field.name}`);
+          return;
+        }
+      }
+    }
+
     setIsUpdating(true);
 
     // Auto-save timer time to timesheet if timer has been running
@@ -155,7 +221,7 @@ export function TicketDetail() {
 
     try {
       const historyEntries: any[] = [];
-      const fields = ["category", "categoryId", "subcategory", "subcategoryId", "service", "serviceId", "serviceProvider", "status", "impact", "urgency", "assignmentGroup", "title", "description", "assignedTo", "affectedUser", "resolutionCode", "resolutionNotes", "resolutionMethod", "closureReason", "watchList", "workNotesList", "businessPhone", "location", "configurationItem", "computerName", "knowledgeArticleUsed", "originalAssignmentGroup", "acknowledged", "passwordReset", "rackspaceTicketNo", "additionalInformation"];
+      const fields = ["incidentCategory", "incident_category", "category", "categoryId", "subcategory", "subcategoryId", "service", "serviceId", "serviceProvider", "status", "impact", "urgency", "assignmentGroup", "title", "description", "assignedTo", "affectedUser", "resolutionCode", "resolutionNotes", "resolutionMethod", "closureReason", "watchList", "workNotesList", "businessPhone", "location", "configurationItem", "computerName", "knowledgeArticleUsed", "originalAssignmentGroup", "acknowledged", "passwordReset", "rackspaceTicketNo", "additionalInformation"];
 
       const fieldChanges: any[] = [];
 
@@ -304,6 +370,19 @@ export function TicketDetail() {
         ...updates,
         points: pointsAwarded > 0 ? (ticket.points || 0) + pointsAwarded : (ticket.points || 0)
       };
+
+      // Save dynamic custom fields selections on update
+      if (hasCategoryAccess && editedTicket.customFields && Object.keys(editedTicket.customFields).length > 0) {
+        try {
+          await fetch(`/api/tickets/${id}/custom-fields`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ customFields: editedTicket.customFields })
+          });
+        } catch (e) {
+          console.error("Error saving dynamic custom fields:", e);
+        }
+      }
 
       await updateDoc(ticketRef, finalUpdates);
 
@@ -981,6 +1060,55 @@ export function TicketDetail() {
                   {visibleCategories.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
                 </select>
               </div>
+
+              {/* Incident Category Dynamic Custom Dropdowns */}
+              {(["admin", "super_admin", "ultra_super_admin"].includes(profile?.role || "") ||
+                ["arun@technosprint.net", "ulter@technosprint.net", "admin@technosprint.net", "admin@connectit.local", "demo-admin@connectit.local", "demo-super_admin@connectit.local", "demo-ultra_super_admin@connectit.local"].includes(user?.email || profile?.email || "")) && (
+                <>
+                  {dynamicFields.map((field) => {
+                    const fieldOptions = dynamicOptions[field.id] || [];
+                    return (
+                      <div key={field.id} className="grid grid-cols-3 items-center gap-4">
+                        <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
+                          <span className="text-red-500 font-bold">*</span> {field.name}
+                        </label>
+                        <select
+                          value={editedTicket?.customFields?.[field.id] || ""}
+                          onChange={e => {
+                            setEditedTicket((prev: any) => ({
+                              ...prev,
+                              customFields: {
+                                ...(prev?.customFields || {}),
+                                [field.id]: e.target.value
+                              }
+                            }));
+                          }}
+                          className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8 bg-white"
+                          required
+                        >
+                          <option value="">Select {field.name}</option>
+                          {fieldOptions.map((opt: any) => (
+                            <option key={opt.id} value={opt.value_text}>{opt.value_text}</option>
+                          ))}
+                        </select>
+                      </div>
+                    );
+                  })}
+                  {dynamicFields.length === 0 && (
+                    <div className="grid grid-cols-3 items-center gap-4">
+                      <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
+                        Incident Category
+                      </label>
+                      <select
+                        disabled
+                        className="col-span-2 p-1.5 border border-border rounded text-xs outline-none h-8 bg-muted/20"
+                      >
+                        <option>No dynamic custom categories defined</option>
+                      </select>
+                    </div>
+                  )}
+                </>
+              )}
 
               {/* Configuration Item */}
               <div className="grid grid-cols-3 items-center gap-4">

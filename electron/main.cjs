@@ -60,21 +60,40 @@ function createWindow() {
   mainWindow.on('closed', () => { mainWindow = null; });
 }
 
+function getBestScreenSource(sources, preferredDisplayId) {
+  const normalizedPreferredId = String(preferredDisplayId || '');
+
+  const exactMatch = sources.find((source) => String(source.display_id || '') === normalizedPreferredId);
+  if (exactMatch) return exactMatch;
+
+  const largestSource = [...sources].sort((a, b) => {
+    const aSize = a.thumbnail.getSize();
+    const bSize = b.thumbnail.getSize();
+    return (bSize.width * bSize.height) - (aSize.width * aSize.height);
+  })[0];
+
+  return largestSource || sources[0];
+}
+
 /* ── IPC: capture entire screen silently ── */
 ipcMain.handle('capture-screen', async () => {
   try {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const captureWidth = Math.max(1, Math.floor(primaryDisplay.size.width * (primaryDisplay.scaleFactor || 1)));
+    const captureHeight = Math.max(1, Math.floor(primaryDisplay.size.height * (primaryDisplay.scaleFactor || 1)));
+
     // Get all available screen sources
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
-      thumbnailSize: { width: 1920, height: 1080 },
+      thumbnailSize: { width: captureWidth, height: captureHeight },
     });
 
     if (!sources || sources.length === 0) {
       return { error: 'No screen sources available' };
     }
 
-    // Use the primary screen (first source)
-    const primarySource = sources[0];
+    // Match the actual primary display instead of assuming the first source.
+    const primarySource = getBestScreenSource(sources, primaryDisplay.id);
     const thumbnail = primarySource.thumbnail;
 
     // Convert NativeImage to JPEG buffer
@@ -87,6 +106,7 @@ ipcMain.handle('capture-screen', async () => {
       width: thumbnail.getSize().width,
       height: thumbnail.getSize().height,
       sourceName: primarySource.name,
+      displayId: primarySource.display_id || null,
     };
   } catch (err) {
     console.error('[Electron] Screen capture failed:', err);
@@ -97,12 +117,15 @@ ipcMain.handle('capture-screen', async () => {
 /* ── IPC: get all screens (for multi-monitor) ── */
 ipcMain.handle('get-screens', async () => {
   try {
+    const primaryDisplay = screen.getPrimaryDisplay();
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
       thumbnailSize: { width: 320, height: 180 },
     });
     return sources.map(s => ({
       id: s.id,
+      displayId: s.display_id || null,
+      isPrimary: String(s.display_id || '') === String(primaryDisplay.id),
       name: s.name,
       thumbnail: s.thumbnail.toDataURL(),
     }));

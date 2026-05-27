@@ -131,7 +131,8 @@ function IncidentMapView({ tickets }: { tickets: any[] }) {
       if (viewMode === "group") {
         key = (t.assignmentGroup && t.assignmentGroup.trim()) ? t.assignmentGroup : "Unassigned";
       } else if (viewMode === "category") {
-        key = (t.category && t.category.trim()) ? t.category : "Uncategorized";
+        const catValue = t.incidentCategory || t.incident_category || t.category;
+        key = (catValue && catValue.trim()) ? catValue : "Uncategorized";
       } else {
         key = t.priority || "4 - Low";
       }
@@ -504,7 +505,8 @@ export function Reports() {
         // Category Distribution
         const catCounts: any = {};
         ticketsList.forEach((t: any) => {
-          catCounts[t.category] = (catCounts[t.category] || 0) + 1;
+          const catValue = t.incidentCategory || t.incident_category || t.category || "Uncategorized";
+          catCounts[catValue] = (catCounts[catValue] || 0) + 1;
         });
         setCategoryData(Object.keys(catCounts).map(cat => ({ name: cat, value: catCounts[cat] })));
 

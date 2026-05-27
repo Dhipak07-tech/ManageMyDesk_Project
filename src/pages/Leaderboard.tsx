@@ -2,7 +2,18 @@ import React, { useState, useEffect } from "react";
 import { Trophy, Medal, Star, Target, RefreshCw, ShieldCheck, Clock, Zap } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../lib/firebase";
+import { db, firebaseAvailable } from "../lib/firebase";
+
+// Module-level helpers (accessible to all sub-components in this file)
+function getInitial(value: string) {
+  const text = String(value || "").trim();
+  return text ? text.charAt(0).toUpperCase() : "?";
+}
+
+function getDisplayName(value: any, fallback = "Unassigned") {
+  const text = String(value || "").trim();
+  return text || fallback;
+}
 
 interface SLAStat {
   id: string;
@@ -55,23 +66,19 @@ export function Leaderboard() {
     return null;
   };
 
-  const getDisplayName = (value: any, fallback = "Unassigned") => {
-    const text = String(value || "").trim();
-    return text || fallback;
-  };
-
-  const getInitial = (value: string) => {
-    const text = String(value || "").trim();
-    return text ? text.charAt(0).toUpperCase() : "?";
-  };
-
   const fetchLeaderboard = async () => {
     setError(null);
+    // If Firebase is not configured, show empty leaderboard gracefully
+    if (!firebaseAvailable) {
+      setLeaderboard([]);
+      setLastUpdated(new Date());
+      setLoading(false);
+      return;
+    }
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
 
-      // Fetch SLA policies
       const slaSnapshot = await getDocs(collection(db, "sla_policies"));
       const slaPolicies: SLAPolicy[] = slaSnapshot.docs.map(doc => ({
         id: doc.id,

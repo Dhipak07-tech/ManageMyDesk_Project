@@ -98,6 +98,7 @@ async function getSQLiteDb() {
         ticket_number TEXT UNIQUE,
         caller TEXT,
         category TEXT,
+        incident_category TEXT,
         subcategory TEXT,
         service TEXT,
         service_offering TEXT,
@@ -202,6 +203,7 @@ async function getSQLiteDb() {
         deduct REAL DEFAULT 0.00,
         work_type TEXT,
         billable TEXT,
+        notes TEXT,
         status TEXT DEFAULT 'Draft',
         elapsed_seconds INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -274,9 +276,37 @@ async function getSQLiteDb() {
         can_view INTEGER DEFAULT 1,
         can_use INTEGER DEFAULT 1,
         can_edit INTEGER DEFAULT 1,
-        is_mandatory INTEGER DEFAULT 0,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         UNIQUE(company_id, feature_id)
+      );
+      CREATE TABLE IF NOT EXISTS incident_categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        description TEXT,
+        status TEXT DEFAULT 'Active',
+        created_by TEXT,
+        created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_updated_by TEXT,
+        last_updated_date DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS incident_category_options (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        category_id INTEGER NOT NULL,
+        value_text TEXT NOT NULL,
+        status TEXT DEFAULT 'Active',
+        created_by TEXT,
+        created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_updated_by TEXT,
+        last_updated_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (category_id) REFERENCES incident_categories(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS ticket_custom_fields (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id TEXT NOT NULL,
+        category_id INTEGER NOT NULL,
+        category_name TEXT NOT NULL,
+        value_text TEXT NOT NULL,
+        FOREIGN KEY (category_id) REFERENCES incident_categories(id) ON DELETE CASCADE
       );
     `);
 
@@ -346,12 +376,14 @@ async function getSQLiteDb() {
 
     // Migrate columns safely
     try { await sqliteDb.exec("ALTER TABLE timesheets ADD COLUMN screenshot_url TEXT;"); } catch (e) {}
+    try { await sqliteDb.exec("ALTER TABLE time_cards ADD COLUMN notes TEXT;"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE activity_entries ADD COLUMN keystrokes INTEGER DEFAULT 0"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE activity_entries ADD COLUMN clicks INTEGER DEFAULT 0"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE users ADD COLUMN last_login DATETIME"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN company_id INTEGER"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN response_sla_start_time DATETIME"); } catch (e) {}
     try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN resolution_sla_start_time DATETIME"); } catch (e) {}
+    try { await sqliteDb.exec("ALTER TABLE tickets ADD COLUMN incident_category TEXT"); } catch (e) {}
     
     console.log('[SQLite] Database initialized with enterprise email tables');
   }
@@ -601,6 +633,7 @@ async function startServer() {
           deduct DECIMAL(10, 2) DEFAULT 0.00,
           work_type VARCHAR(50),
           billable VARCHAR(50),
+          notes TEXT,
           status ENUM('Draft', 'Submitted', 'Approved', 'Rejected') DEFAULT 'Draft',
           elapsed_seconds INT DEFAULT 0,
           created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -610,6 +643,10 @@ async function startServer() {
         ) ENGINE=InnoDB
       `);
       console.log('[MySQL] Timesheet tables initialized');
+      try {
+        await execute("ALTER TABLE time_cards ADD COLUMN notes TEXT");
+        console.log('[MySQL] Added notes column to time_cards table');
+      } catch (e) {}
 
       // ═══ MASTER DATA TABLES ═══
       
@@ -744,6 +781,49 @@ async function startServer() {
           INDEX idx_is_read (is_read)
         ) ENGINE=InnoDB
       `);
+      await execute(`
+        CREATE TABLE IF NOT EXISTS incident_categories (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          name VARCHAR(100) UNIQUE NOT NULL,
+          description TEXT,
+          status ENUM('Active', 'Inactive') DEFAULT 'Active',
+          created_by VARCHAR(255),
+          created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          last_updated_by VARCHAR(255),
+          last_updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          INDEX idx_name (name),
+          INDEX idx_status (status)
+        ) ENGINE=InnoDB;
+      `).catch(() => {});
+      
+      await execute(`
+        CREATE TABLE IF NOT EXISTS incident_category_options (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          category_id INT NOT NULL,
+          value_text VARCHAR(255) NOT NULL,
+          status ENUM('Active', 'Inactive') DEFAULT 'Active',
+          created_by VARCHAR(255),
+          created_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          last_updated_by VARCHAR(255),
+          last_updated_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          FOREIGN KEY (category_id) REFERENCES incident_categories(id) ON DELETE CASCADE,
+          INDEX idx_category (category_id),
+          INDEX idx_status (status)
+        ) ENGINE=InnoDB;
+      `).catch(() => {});
+
+      await execute(`
+        CREATE TABLE IF NOT EXISTS ticket_custom_fields (
+          id INT AUTO_INCREMENT PRIMARY KEY,
+          ticket_id VARCHAR(128) NOT NULL,
+          category_id INT NOT NULL,
+          category_name VARCHAR(255) NOT NULL,
+          value_text VARCHAR(255) NOT NULL,
+          FOREIGN KEY (category_id) REFERENCES incident_categories(id) ON DELETE CASCADE,
+          INDEX idx_ticket_id (ticket_id)
+        ) ENGINE=InnoDB;
+      `).catch(() => {});
+
       console.log('[MySQL] Activity tracker and notification tables initialized');
     } catch (e: any) {
       console.error('[MySQL] Failed to initialize timesheet tables:', e.message);
@@ -973,6 +1053,343 @@ async function startServer() {
     }
   });
 
+  // ═══ Incident Category Management Endpoints ═══
+  
+  // Helper to check admin permission
+  async function checkAdminAccess(req: any, res: any): Promise<boolean> {
+    const uid = req.query.uid || req.body.uid || req.headers["x-user-uid"];
+    const email = req.query.email || req.body.email || req.headers["x-user-email"];
+    
+    const fallbackEmails = ["arun@technosprint.net", "ulter@technosprint.net", "admin@technosprint.net"];
+    if (email && fallbackEmails.includes(email.toLowerCase())) {
+      return true;
+    }
+    
+    if (!uid) {
+      res.status(401).json({ error: "Unauthorized: Missing user credentials" });
+      return false;
+    }
+    
+    try {
+      const users = await query("SELECT role, email FROM users WHERE uid = ?", [uid]);
+      if (users.length > 0) {
+        const user = users[0];
+        if (["admin", "super_admin", "ultra_super_admin"].includes(user.role) || (user.email && fallbackEmails.includes(user.email.toLowerCase()))) {
+          return true;
+        }
+      }
+    } catch (err) {
+      console.error("Error checking admin access:", err);
+    }
+    
+    res.status(403).json({ error: "Access denied: Unauthorized role" });
+    return false;
+  }
+
+  // GET: Retrieve all categories (or active only for dynamic dropdown)
+  app.get("/api/incident-categories", async (req, res) => {
+    try {
+      const activeOnly = req.query.active_only === "true";
+      
+      // If NOT active_only, enforce admin restrictions
+      if (!activeOnly) {
+        const authorized = await checkAdminAccess(req, res);
+        if (!authorized) return;
+      }
+      
+      let sql = "SELECT * FROM incident_categories";
+      const params: any[] = [];
+      
+      if (activeOnly) {
+        sql += " WHERE status = 'Active'";
+      }
+      
+      sql += " ORDER BY name ASC";
+      
+      const categories = await query(sql, params);
+      res.json(categories.map(c => ({ id: c.id.toString(), ...c })));
+    } catch (error: any) {
+      console.error("Error fetching incident categories:", error);
+      res.status(500).json({ error: "Failed to fetch incident categories" });
+    }
+  });
+
+  // POST: Create a new incident category
+  app.post("/api/incident-categories", async (req, res) => {
+    try {
+      const authorized = await checkAdminAccess(req, res);
+      if (!authorized) return;
+      
+      let { name, description, status, created_by } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: "Category name is required" });
+      }
+      
+      name = name.trim();
+      status = status || "Active";
+      
+      // Check for duplicate category name (case-insensitive)
+      const existing = await query("SELECT * FROM incident_categories WHERE LOWER(name) = ?", [name.toLowerCase()]);
+      if (existing.length > 0) {
+        return res.status(400).json({ error: "This category already exists" });
+      }
+      
+      const result = await execute(
+        "INSERT INTO incident_categories (name, description, status, created_by, last_updated_by) VALUES (?, ?, ?, ?, ?)",
+        [name, description || "", status, created_by || "Admin", created_by || "Admin"]
+      );
+      
+      res.json({
+        id: result.insertId.toString(),
+        name,
+        description,
+        status,
+        created_by,
+        message: "Incident category created successfully"
+      });
+    } catch (error: any) {
+      console.error("Error creating incident category:", error);
+      res.status(500).json({ error: "Failed to create incident category" });
+    }
+  });
+
+  // PUT: Update an incident category
+  app.put("/api/incident-categories/:id", async (req, res) => {
+    try {
+      const authorized = await checkAdminAccess(req, res);
+      if (!authorized) return;
+      
+      const { id } = req.params;
+      let { name, description, status, last_updated_by } = req.body;
+      if (!name || !name.trim()) {
+        return res.status(400).json({ error: "Category name is required" });
+      }
+      
+      name = name.trim();
+      status = status || "Active";
+      
+      // Check duplicate name on OTHER categories
+      const existing = await query("SELECT * FROM incident_categories WHERE LOWER(name) = ? AND id != ?", [name.toLowerCase(), id]);
+      if (existing.length > 0) {
+        return res.status(400).json({ error: "This category already exists" });
+      }
+      
+      // Perform database update
+      await execute(
+        "UPDATE incident_categories SET name = ?, description = ?, status = ?, last_updated_by = ?, last_updated_date = CURRENT_TIMESTAMP WHERE id = ?",
+        [name, description || "", status, last_updated_by || "Admin", id]
+      );
+      
+      res.json({
+        id,
+        name,
+        description,
+        status,
+        last_updated_by,
+        message: "Incident category updated successfully"
+      });
+    } catch (error: any) {
+      console.error("Error updating incident category:", error);
+      res.status(500).json({ error: "Failed to update incident category" });
+    }
+  });
+
+  // DELETE: Delete an incident category with integrity checks
+  app.delete("/api/incident-categories/:id", async (req, res) => {
+    try {
+      const authorized = await checkAdminAccess(req, res);
+      if (!authorized) return;
+      
+      const { id } = req.params;
+      
+      // Get category name
+      const categories = await query("SELECT name FROM incident_categories WHERE id = ?", [id]);
+      if (categories.length === 0) {
+        return res.status(404).json({ error: "Category not found" });
+      }
+      
+      const categoryName = categories[0].name;
+      
+      // Integrity check: make sure it is not linked to any ACTIVE tickets
+      const activeTickets = await query(
+        "SELECT COUNT(*) as count FROM tickets WHERE (incident_category = ? OR category = ?) AND status NOT IN ('Resolved', 'Closed', 'Canceled')",
+        [categoryName, categoryName]
+      );
+      
+      if (activeTickets[0]?.count > 0) {
+        return res.status(400).json({ error: "This category is currently used by existing tickets" });
+      }
+      
+      // Proceed to delete
+      await execute("DELETE FROM incident_categories WHERE id = ?", [id]);
+      
+      res.json({ success: true, message: "Incident category deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting incident category:", error);
+      res.status(500).json({ error: "Failed to delete incident category" });
+    }
+  });
+
+  // GET: Retrieve all custom fields (options) for categories
+  app.get("/api/incident-categories/options", async (req, res) => {
+    try {
+      const categoryId = req.query.category_id;
+      const activeOnly = req.query.active_only === "true";
+      let sql = "SELECT * FROM incident_category_options";
+      const params: any[] = [];
+      const clauses: string[] = [];
+
+      if (categoryId) {
+        clauses.push("category_id = ?");
+        params.push(categoryId);
+      }
+      if (activeOnly) {
+        clauses.push("status = 'Active'");
+      }
+
+      if (clauses.length > 0) {
+        sql += " WHERE " + clauses.join(" AND ");
+      }
+      sql += " ORDER BY value_text ASC";
+
+      const options = await query(sql, params);
+      res.json(options.map(o => ({ id: o.id.toString(), ...o })));
+    } catch (error: any) {
+      console.error("Error fetching options:", error);
+      res.status(500).json({ error: "Failed to fetch category options" });
+    }
+  });
+
+  // POST: Create a new custom dropdown value
+  app.post("/api/incident-categories/options", async (req, res) => {
+    try {
+      const authorized = await checkAdminAccess(req, res);
+      if (!authorized) return;
+
+      let { category_id, value_text, status, created_by } = req.body;
+      if (!category_id || !value_text || !value_text.trim()) {
+        return res.status(400).json({ error: "Category ID and value text are required" });
+      }
+
+      value_text = value_text.trim();
+      status = status || "Active";
+
+      // Check duplicate option under same category
+      const existing = await query(
+        "SELECT * FROM incident_category_options WHERE category_id = ? AND LOWER(value_text) = ?",
+        [category_id, value_text.toLowerCase()]
+      );
+      if (existing.length > 0) {
+        return res.status(400).json({ error: "This value already exists in this category" });
+      }
+
+      const result = await execute(
+        "INSERT INTO incident_category_options (category_id, value_text, status, created_by, last_updated_by) VALUES (?, ?, ?, ?, ?)",
+        [category_id, value_text, status, created_by || "Admin", created_by || "Admin"]
+      );
+
+      res.json({
+         id: result.insertId.toString(),
+         category_id,
+         value_text,
+         status,
+         message: "Value added successfully"
+      });
+    } catch (error: any) {
+      console.error("Error creating option:", error);
+      res.status(500).json({ error: "Failed to add value" });
+    }
+  });
+
+  // PUT: Update an existing custom dropdown value
+  app.put("/api/incident-categories/options/:id", async (req, res) => {
+    try {
+      const authorized = await checkAdminAccess(req, res);
+      if (!authorized) return;
+
+      const { id } = req.params;
+      let { value_text, status, last_updated_by } = req.body;
+      if (!value_text || !value_text.trim()) {
+        return res.status(400).json({ error: "Value text is required" });
+      }
+
+      value_text = value_text.trim();
+      status = status || "Active";
+
+      await execute(
+        "UPDATE incident_category_options SET value_text = ?, status = ?, last_updated_by = ?, last_updated_date = CURRENT_TIMESTAMP WHERE id = ?",
+        [value_text, status, last_updated_by || "Admin", id]
+      );
+
+      res.json({
+        id,
+        value_text,
+        status,
+        message: "Value updated successfully"
+      });
+    } catch (error: any) {
+      console.error("Error updating option:", error);
+      res.status(500).json({ error: "Failed to update value" });
+    }
+  });
+
+  // DELETE: Delete a custom dropdown value
+  app.delete("/api/incident-categories/options/:id", async (req, res) => {
+    try {
+      const authorized = await checkAdminAccess(req, res);
+      if (!authorized) return;
+
+      const { id } = req.params;
+      await execute("DELETE FROM incident_category_options WHERE id = ?", [id]);
+      res.json({ success: true, message: "Value deleted successfully" });
+    } catch (error: any) {
+      console.error("Error deleting option:", error);
+      res.status(500).json({ error: "Failed to delete value" });
+    }
+  });
+
+  // GET: Fetch saved dynamic custom fields for a specific ticket
+  app.get("/api/tickets/:id/custom-fields", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const rows = await query("SELECT category_id, category_name, value_text FROM ticket_custom_fields WHERE ticket_id = ?", [id]);
+      const customFields: Record<string, string> = {};
+      rows.forEach(r => {
+        customFields[r.category_id.toString()] = r.value_text;
+      });
+      res.json(customFields);
+    } catch (error: any) {
+      console.error("Error fetching ticket custom fields:", error);
+      res.status(500).json({ error: "Failed to fetch ticket custom fields" });
+    }
+  });
+
+  // POST: Save dynamic custom fields for a specific ticket
+  app.post("/api/tickets/:id/custom-fields", async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { customFields } = req.body;
+      if (customFields && typeof customFields === 'object') {
+        // Delete old selections first
+        await execute("DELETE FROM ticket_custom_fields WHERE ticket_id = ?", [id.toString()]);
+        for (const [catId, valText] of Object.entries(customFields)) {
+          if (valText) {
+            const cats = await query("SELECT name FROM incident_categories WHERE id = ?", [catId]);
+            const catName = cats[0]?.name || `Field_${catId}`;
+            await execute(
+              "INSERT INTO ticket_custom_fields (ticket_id, category_id, category_name, value_text) VALUES (?, ?, ?, ?)",
+              [id.toString(), catId, catName, valText]
+            );
+          }
+        }
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error saving ticket custom fields:", error);
+      res.status(500).json({ error: "Failed to save ticket custom fields" });
+    }
+  });
+
   // Ticket Endpoints
   app.get("/api/tickets/all", async (req, res) => {
     try {
@@ -1048,9 +1465,17 @@ async function startServer() {
       // Get history
       const history = await query("SELECT * FROM ticket_history WHERE ticket_id = ? ORDER BY timestamp DESC", [ticket.id]);
 
+      // Get dynamic custom fields
+      const customFieldsRows = await query("SELECT category_id, category_name, value_text FROM ticket_custom_fields WHERE ticket_id = ?", [ticket.id.toString()]);
+      const customFields: Record<string, string> = {};
+      customFieldsRows.forEach(row => {
+        customFields[row.category_id.toString()] = row.value_text;
+      });
+
       res.json({
         id: ticket.id.toString(),
         ...ticket,
+        customFields,
         comments: comments.map(c => ({ id: c.id.toString(), ...c })),
         history: history.map(h => ({ id: h.id.toString(), ...h }))
       });
@@ -1063,6 +1488,24 @@ async function startServer() {
   app.post("/api/tickets/create", async (req, res) => {
     try {
       console.log("Creating ticket with data:", JSON.stringify(req.body));
+
+      // Deep Backend Role Validation
+      let hasCategoryAccess = false;
+      const createdBy = req.body.createdBy;
+      if (createdBy) {
+        const users = await query("SELECT role FROM users WHERE uid = ?", [createdBy]);
+        if (users.length > 0) {
+          const userRole = users[0].role;
+          if (["admin", "super_admin", "ultra_super_admin"].includes(userRole)) {
+            hasCategoryAccess = true;
+          }
+        }
+      }
+
+      if (!hasCategoryAccess) {
+        delete req.body.incidentCategory;
+        delete req.body.incident_category;
+      }
 
       // Generate ticket number
       const ticketNumber = await generateTicketNumber();
@@ -1083,6 +1526,7 @@ async function startServer() {
         ticket_number: ticketNumber,
         caller: req.body.caller || "System",
         category: req.body.category || "Inquiry / Help",
+        incident_category: req.body.incidentCategory || req.body.incident_category || null,
         title: req.body.title,
         description: req.body.description,
         status: "New",
@@ -1112,6 +1556,20 @@ async function startServer() {
       );
 
       const ticketId = result.insertId;
+
+      // Save dynamic custom fields if present
+      if (req.body.customFields && typeof req.body.customFields === 'object') {
+        for (const [catId, valText] of Object.entries(req.body.customFields)) {
+          if (valText) {
+            const cats = await query("SELECT name FROM incident_categories WHERE id = ?", [catId]);
+            const catName = cats[0]?.name || `Field_${catId}`;
+            await execute(
+              "INSERT INTO ticket_custom_fields (ticket_id, category_id, category_name, value_text) VALUES (?, ?, ?, ?)",
+              [ticketId.toString(), catId, catName, valText]
+            );
+          }
+        }
+      }
 
       // Add creation activity to timeline
       await execute(
@@ -1282,14 +1740,41 @@ async function startServer() {
         }
       }
 
+      // Deep Backend Role Validation
+      let hasUpdateAccess = false;
+      const updatedById = req.body.updatedById || req.body.createdBy;
+      if (updatedById) {
+        const users = await query("SELECT role FROM users WHERE uid = ?", [updatedById]);
+        if (users.length > 0) {
+          const userRole = users[0].role;
+          if (["admin", "super_admin", "ultra_super_admin"].includes(userRole)) {
+            hasUpdateAccess = true;
+          }
+        }
+      }
+
       const updateData: any = {
         ...req.body,
         points: ticket.points + points,
         updated_at: formatDate(new Date())
       };
 
+      if (req.body.incidentCategory !== undefined) {
+        updateData.incident_category = req.body.incidentCategory;
+        delete updateData.incidentCategory;
+      }
+
+      if (!hasUpdateAccess) {
+        delete updateData.incidentCategory;
+        delete updateData.incident_category;
+      }
+
       if (req.body.status === "Resolved" || req.body.status === "Closed") {
         updateData.resolved_at = formatDate(new Date());
+      }
+
+      if (updateData.customFields !== undefined) {
+        delete updateData.customFields;
       }
 
       // Build update query
@@ -1298,6 +1783,22 @@ async function startServer() {
       const values = [...fields.map(k => updateData[k]), id];
 
       await execute(`UPDATE tickets SET ${setClause} WHERE id = ?`, values);
+
+      // Save dynamic custom fields if present
+      if (req.body.customFields && typeof req.body.customFields === 'object') {
+        // Delete old selections first
+        await execute("DELETE FROM ticket_custom_fields WHERE ticket_id = ?", [id.toString()]);
+        for (const [catId, valText] of Object.entries(req.body.customFields)) {
+          if (valText) {
+            const cats = await query("SELECT name FROM incident_categories WHERE id = ?", [catId]);
+            const catName = cats[0]?.name || `Field_${catId}`;
+            await execute(
+              "INSERT INTO ticket_custom_fields (ticket_id, category_id, category_name, value_text) VALUES (?, ?, ?, ?)",
+              [id.toString(), catId, catName, valText]
+            );
+          }
+        }
+      }
 
       // Add activity entry for status/field changes
       if (Object.keys(updateData).length > 0) {

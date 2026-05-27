@@ -135,6 +135,13 @@ export function Sidebar() {
       ]
     },
     {
+      label: "Data Analytics",
+      adminOnly: true,
+      items: [
+        { icon: BarChart3, label: "Data Analytics", path: "/data-analytics" },
+      ]
+    },
+    {
       label: "System Administration",
       adminOnly: true,
       items: [
@@ -147,6 +154,7 @@ export function Sidebar() {
         { icon: CheckCircle2, label: "Approved Timesheets", path: "/timesheet/reports?status=Approved" },
         { icon: Palette, label: "Branding", path: "/branding", superAdminOnly: true },
         { icon: Tag, label: "Custom Form Dropdowns", path: "/custom-dropdowns" },
+        { icon: Tag, label: "Incident Category Management", path: "/incident-categories" },
       ]
     }
   ];

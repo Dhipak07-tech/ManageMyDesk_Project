@@ -11,7 +11,7 @@ function fmtHMS(s: number) {
 
 export function AppNavbar() {
   const { user, profile } = useAuth();
-  const { theme, setTheme } = useTheme();
+  const { theme, setTheme, resolvedTheme, lightBrightness, setLightBrightness } = useTheme();
   const { status, elapsed, startWatcher, stopWatcher } = useActivityTracker();
   const [notificationCount, setNotificationCount] = React.useState(0);
   const [notifications, setNotifications] = React.useState<any[]>([]);
@@ -88,7 +88,7 @@ export function AppNavbar() {
         <input 
           type="text" 
           placeholder="Search tickets, users..." 
-          className="bg-transparent border-none outline-none text-sm w-full"
+          className="bg-transparent border-none outline-none text-sm w-full text-foreground placeholder:text-muted-foreground/70"
         />
       </div>
 
@@ -132,28 +132,47 @@ export function AppNavbar() {
         </div>
 
         {/* Theme Toggle */}
-        <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1">
-          <button
-            onClick={() => setTheme("light")}
-            className={`p-1.5 rounded-md transition-colors ${theme === "light" ? "bg-white shadow-sm text-sn-green" : "text-muted-foreground hover:text-foreground"}`}
-            title="Light mode"
-          >
-            <Sun className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setTheme("dark")}
-            className={`p-1.5 rounded-md transition-colors ${theme === "dark" ? "bg-white shadow-sm text-sn-green" : "text-muted-foreground hover:text-foreground"}`}
-            title="Dark mode"
-          >
-            <Moon className="w-4 h-4" />
-          </button>
-          <button
-            onClick={() => setTheme("system")}
-            className={`p-1.5 rounded-md transition-colors ${theme === "system" ? "bg-white shadow-sm text-sn-green" : "text-muted-foreground hover:text-foreground"}`}
-            title="System preference"
-          >
-            <Monitor className="w-4 h-4" />
-          </button>
+        {/* Theme Toggle & Brightness Control Container */}
+        <div className="flex items-center gap-2 bg-muted/50 rounded-lg p-1">
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setTheme("light")}
+              className={`p-1.5 rounded-md transition-colors ${theme === "light" ? "bg-white shadow-sm text-sn-green" : "text-muted-foreground hover:text-foreground"}`}
+              title="Light mode"
+            >
+              <Sun className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setTheme("dark")}
+              className={`p-1.5 rounded-md transition-colors ${theme === "dark" ? "bg-white shadow-sm text-sn-green" : "text-muted-foreground hover:text-foreground"}`}
+              title="Dark mode"
+            >
+              <Moon className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setTheme("system")}
+              className={`p-1.5 rounded-md transition-colors ${theme === "system" ? "bg-white shadow-sm text-sn-green" : "text-muted-foreground hover:text-foreground"}`}
+              title="System preference"
+            >
+              <Monitor className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Luxury Brightness slider exclusively in Light Mode */}
+          {resolvedTheme === "light" && (
+            <div className="flex items-center gap-2 border-l border-border pl-2 pr-1.5 animate-in slide-in-from-right duration-250">
+              <Sun className="w-3.5 h-3.5 text-muted-foreground" />
+              <input
+                type="range"
+                min="80"
+                max="99"
+                value={lightBrightness}
+                onChange={(e) => setLightBrightness(Number(e.target.value))}
+                className="w-20 h-1 bg-muted-foreground/30 rounded-lg appearance-none cursor-pointer accent-sn-green focus:outline-none"
+                title="Adjust background brightness"
+              />
+            </div>
+          )}
         </div>
 
         <div className="relative" ref={dropdownRef}>

@@ -628,8 +628,8 @@ export class ActivityWatcher {
       try {
         let blob: Blob;
 
-        if (typeof ImageCapture !== 'undefined') {
-          const ic = new ImageCapture(this.screenTrack);
+        if (typeof (window as any).ImageCapture !== 'undefined') {
+          const ic = new (window as any).ImageCapture(this.screenTrack);
           const bitmap = await ic.grabFrame();
           const canvas = document.createElement('canvas');
           canvas.width = Math.round(bitmap.width * 0.75);

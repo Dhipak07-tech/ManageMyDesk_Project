@@ -130,7 +130,8 @@ export function Calendar() {
   const [editPanel, setEditPanel] = useState<any>(null);
   const [editForm, setEditForm] = useState({
     startTime: "", endTime: "", minutesWorked: "", workType: "Remote",
-    billable: "Billable", description: "", task: "", shortDescription: ""
+    billable: "Billable", description: "", task: "", shortDescription: "",
+    notes: ""
   });
   const [editSaving, setEditSaving] = useState(false);
 
@@ -368,6 +369,7 @@ export function Calendar() {
       description: card.description || "",
       task: card.task || "",
       shortDescription: card.short_description || "",
+      notes: card.notes || "",
     });
   }
 
@@ -389,6 +391,7 @@ export function Calendar() {
             description: editForm.description,
             short_description: editForm.shortDescription,
             task: editForm.task,
+            notes: editForm.notes,
           })
         });
       } else {
@@ -427,6 +430,7 @@ export function Calendar() {
             description: editForm.description,
             short_description: editForm.shortDescription,
             task: editForm.task,
+            notes: editForm.notes,
           })
         });
       }
@@ -864,6 +868,11 @@ export function Calendar() {
                 <label className="text-xs text-muted-foreground font-medium block mb-1">Description</label>
                 <textarea value={editForm.description} onChange={e => setEditForm(f => ({ ...f, description: e.target.value }))}
                   rows={4} className="w-full p-2 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green resize-none" />
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground font-medium block mb-1">Notes</label>
+                <textarea value={editForm.notes} onChange={e => setEditForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={2} className="w-full p-2 border border-border rounded text-xs outline-none focus:ring-1 focus:ring-sn-green resize-none" placeholder="Additional notes..." />
               </div>
             </div>
 
