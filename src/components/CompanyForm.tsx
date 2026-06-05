@@ -43,8 +43,6 @@ export function CompanyForm({ initialData, isEditing = false, onSave, onCancel }
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [successMsg, setSuccessMsg] = useState("");
-  const [draftStatus, setDraftStatus] = useState<"saved" | "saving" | "unsaved" | "idle">("idle");
-  const saveTimeoutRef = useRef<any>(null);
 
   // Load email configs
   useEffect(() => {
@@ -85,17 +83,6 @@ export function CompanyForm({ initialData, isEditing = false, onSave, onCancel }
         defaultSupportMailbox: initialData.defaultSupportMailbox || "",
         email_integration_id: initialData.email_integration_id || ""
       });
-    } else if (!isEditing) {
-      const savedDraft = localStorage.getItem("company_create_draft");
-      if (savedDraft) {
-        try {
-          const parsed = JSON.parse(savedDraft);
-          setFormData(prev => ({ ...prev, ...parsed }));
-          setDraftStatus("saved");
-        } catch (e) {
-          console.error("Failed to parse company draft:", e);
-        }
-      }
     }
   }, [isEditing, initialData]);
 
@@ -127,18 +114,6 @@ export function CompanyForm({ initialData, isEditing = false, onSave, onCancel }
             return next;
           });
         }
-      }
-
-      // Auto-save draft logic (only if creating a new company)
-      if (!isEditing) {
-        setDraftStatus("unsaved");
-        if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current);
-        
-        saveTimeoutRef.current = setTimeout(() => {
-          setDraftStatus("saving");
-          localStorage.setItem("company_create_draft", JSON.stringify(updated));
-          setTimeout(() => setDraftStatus("saved"), 300);
-        }, 800);
       }
 
       return updated;
@@ -173,11 +148,6 @@ export function CompanyForm({ initialData, isEditing = false, onSave, onCancel }
       await onSave(formData);
       setSuccessMsg(isEditing ? "Company updated successfully." : "Company created successfully.");
       
-      // Clear draft on successful create
-      if (!isEditing) {
-        localStorage.removeItem("company_create_draft");
-      }
-      
       setTimeout(() => {
         setSuccessMsg("");
       }, 4000);
@@ -191,72 +161,6 @@ export function CompanyForm({ initialData, isEditing = false, onSave, onCancel }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-8 pb-16">
-      {/* Draft Status Indicator & Top Banner */}
-      <div className="flex items-center justify-between bg-slate-50 border border-slate-200/80 rounded-xl px-4 py-3 text-xs">
-        <div className="flex items-center gap-2 text-slate-600">
-          <span className="relative flex h-2 w-2">
-            <span className={cn(
-              "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-              draftStatus === "unsaved" ? "bg-amber-400" : draftStatus === "saved" ? "bg-emerald-400" : "bg-slate-400"
-            )}></span>
-            <span className={cn(
-              "relative inline-flex rounded-full h-2 w-2",
-              draftStatus === "unsaved" ? "bg-amber-500" : draftStatus === "saved" ? "bg-emerald-500" : "bg-slate-500"
-            )}></span>
-          </span>
-          <span>
-            {isEditing ? (
-              <span className="font-medium text-slate-700">Editing Mode (Auto-save Draft is disabled during editing)</span>
-            ) : (
-              <span>
-                {draftStatus === "saved" && "Draft saved automatically"}
-                {draftStatus === "saving" && "Saving draft..."}
-                {draftStatus === "unsaved" && "Unsaved changes"}
-                {draftStatus === "idle" && "Ready to create"}
-              </span>
-            )}
-          </span>
-        </div>
-        {!isEditing && draftStatus === "saved" && (
-          <button
-            type="button"
-            onClick={() => {
-              if (confirm("Are you sure you want to clear your current draft?")) {
-                localStorage.removeItem("company_create_draft");
-                setFormData({
-                  name: "",
-                  contactName: "",
-                  phone: "",
-                  email: "",
-                  website: "",
-                  address1: "",
-                  address2: "",
-                  city: "",
-                  province: "",
-                  postalCode: "",
-                  country: "",
-                  logoUrl: "",
-                  primaryColor: "#0F172A",
-                  secondaryColor: "#10B981",
-                  supportSignature: "",
-                  type: "Customer",
-                  status: "Active",
-                  industry: "",
-                  priorityTier: "Tier 3 - Medium",
-                  defaultAssignmentGroup: "",
-                  defaultSlaPolicy: "",
-                  defaultSupportMailbox: "",
-                  email_integration_id: ""
-                });
-                setDraftStatus("idle");
-              }
-            }}
-            className="text-red-500 hover:text-red-700 transition-colors font-medium"
-          >
-            Clear Draft
-          </button>
-        )}
-      </div>
 
       {/* Success / Error Alerts */}
       {successMsg && (

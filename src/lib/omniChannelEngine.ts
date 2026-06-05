@@ -244,6 +244,11 @@ export class OmniChannelEngine {
             [ticketSqlId, 'email_received', 'public', from, from, "New email reply received", JSON.stringify(activityData)]
           );
           
+          await execute(
+            "INSERT INTO ticket_email_activities (ticket_id, direction, sender, recipient, subject, body, status) VALUES (?, 'inbound', ?, ?, ?, ?, 'success')",
+            [ticketSqlId, from, config.email_address, subject, body.substring(0, 5000)]
+          );
+          
           await execute("UPDATE tickets SET updated_at = ? WHERE id = ?", [formatDate(new Date()), ticketSqlId]);
 
           // Sync to Firestore
@@ -312,6 +317,11 @@ export class OmniChannelEngine {
         })]
       );
 
+      await execute(
+        "INSERT INTO ticket_email_activities (ticket_id, direction, sender, recipient, subject, body, status) VALUES (?, 'inbound', ?, ?, ?, ?, 'success')",
+        [ticketSqlId, from, config.email_address, subject, body.substring(0, 5000)]
+      );
+
       // Firestore Insertion
       try {
         await addDoc(collection(firestoreDb, "tickets"), {
@@ -332,7 +342,7 @@ export class OmniChannelEngine {
         });
       } catch {}
 
-      // Send Acknowledgement using THIS company's email
+      // Queue Acknowledgement email instead of sending directly
       try {
         const ackSubject = `[${ticketNumber}] Ticket Created: ${subject}`;
         const ackHtml = `
@@ -350,36 +360,26 @@ export class OmniChannelEngine {
           </div>
         `;
         
-        await this.sendEmailByConfig(config, from, ackSubject, ackHtml);
-
-        // Log success activity
         await execute(
-          "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [
-            ticketSqlId,
-            "email_sent",
-            "public",
-            "System",
-            `${config.company_name} Auto-Mail`,
-            `Acknowledgement email successfully sent to ${from}`,
-            JSON.stringify({ to: from, subject: ackSubject, sentAt: new Date().toISOString() })
-          ]
+          "INSERT INTO email_queue (ticket_id, company_id, email_integration_id, direction, recipient, subject, body, status) VALUES (?, ?, ?, 'outbound', ?, ?, ?, 'pending')",
+          [ticketSqlId, companyId, config.id, from, ackSubject, ackHtml]
         );
-      } catch (mailErr: any) {
-        console.error(`[OmniChannel] Failed to send inbound auto-ack for ${ticketNumber}:`, mailErr.message);
-        // Log failure activity
+
+        // Log success activity for queuing
         await execute(
           "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
           [
             ticketSqlId,
-            "email_failed",
+            "email_queued",
             "internal",
             "System",
             `${config.company_name} Auto-Mail`,
-            `Failed to send acknowledgement email to ${from}: ${mailErr.message}`,
-            JSON.stringify({ to: from, error: mailErr.message, failedAt: new Date().toISOString() })
+            `Acknowledgement email queued for ${from}`,
+            JSON.stringify({ to: from, subject: ackSubject, queuedAt: new Date().toISOString() })
           ]
         );
+      } catch (mailErr: any) {
+        console.error(`[OmniChannel] Failed to queue inbound auto-ack for ${ticketNumber}:`, mailErr.message);
       }
 
     } catch (error: any) {

@@ -337,6 +337,89 @@ async function getSQLiteDb() {
         details TEXT,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP
       );
+      CREATE TABLE IF NOT EXISTS email_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER,
+        company_id INTEGER,
+        email_integration_id INTEGER,
+        direction TEXT DEFAULT 'outbound',
+        recipient TEXT,
+        subject TEXT,
+        body TEXT,
+        status TEXT DEFAULT 'pending',
+        attempts INTEGER DEFAULT 0,
+        error_message TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        processed_at DATETIME
+      );
+      CREATE TABLE IF NOT EXISTS ticket_email_activities (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ticket_id INTEGER NOT NULL,
+        direction TEXT,
+        sender TEXT,
+        recipient TEXT,
+        subject TEXT,
+        body TEXT,
+        status TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+      );
+      CREATE TABLE IF NOT EXISTS company_email_configs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_name TEXT,
+        email_address TEXT,
+        smtp_host TEXT,
+        smtp_port INTEGER,
+        smtp_user TEXT,
+        smtp_pass TEXT,
+        imap_host TEXT,
+        imap_port INTEGER,
+        imap_user TEXT,
+        imap_pass TEXT,
+        encryption TEXT,
+        is_active INTEGER DEFAULT 1,
+        is_default INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS companies (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        contact_name TEXT,
+        phone TEXT,
+        email TEXT,
+        address1 TEXT,
+        address2 TEXT,
+        city TEXT,
+        province TEXT,
+        postal_code TEXT,
+        country TEXT,
+        website TEXT,
+        logo_url TEXT,
+        type TEXT,
+        status TEXT,
+        email_integration_id INTEGER,
+        primary_color TEXT,
+        secondary_color TEXT,
+        support_signature TEXT,
+        industry TEXT,
+        priority_tier TEXT,
+        default_assignment_group TEXT,
+        default_sla_policy TEXT,
+        default_support_mailbox TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS company_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        company_id INTEGER,
+        action TEXT,
+        field_name TEXT,
+        old_value TEXT,
+        new_value TEXT,
+        user TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      );
     `);
     // Migrate: add screenshot_url column if missing (safe to re-run)
     try { await sqliteDb.exec("ALTER TABLE timesheets ADD COLUMN screenshot_url TEXT;"); } catch (e) { }
@@ -586,30 +669,30 @@ async function checkFirestoreSLABreaches() {
       fsWhere("status", "not-in", ["Resolved", "Closed", "Canceled"])
     );
     const snapshot = await fsGetDocs(ticketsQuery);
-    
+
     for (const docSnap of snapshot.docs) {
       const ticket = docSnap.data();
       const ticketId = docSnap.id;
-      
+
       if (ticket.responseDeadline && !ticket.firstResponseAt && ticket.responseSlaStatus !== "Breached" && ticket.responseSlaStatus !== "Completed") {
         const deadlineMs = new Date(ticket.responseDeadline).getTime();
         const totalPaused = ticket.totalPausedTime || 0;
         const nowMs = now.getTime();
-        
+
         if (nowMs > (deadlineMs + totalPaused)) {
           console.log(`[SLA Monitor] Ticket ${ticket.number || ticketId} Response SLA breached!`);
-          
+
           const breachDurationMs = nowMs - (deadlineMs + totalPaused);
           const breachDuration = formatBreachDuration(breachDurationMs);
           const breachTimeslot = getBreachTimeslot(breachDurationMs);
           const startMs = new Date(ticket.responseSlaStartTime || ticket.createdAt).getTime();
           const actualTimeMs = nowMs - startMs;
-          
+
           await fsUpdateDoc(fsDoc(firestoreDb, "tickets", ticketId), {
             responseSlaStatus: "Breached",
             updatedAt: nowStr
           });
-          
+
           await recordBreach({
             record_id: ticketId,
             record_type: "Ticket",
@@ -625,26 +708,26 @@ async function checkFirestoreSLABreaches() {
           });
         }
       }
-      
+
       if (ticket.resolutionDeadline && ticket.firstResponseAt && !ticket.resolvedAt && ticket.resolutionSlaStatus !== "Breached" && ticket.resolutionSlaStatus !== "Completed") {
         const deadlineMs = new Date(ticket.resolutionDeadline).getTime();
         const totalPaused = ticket.totalPausedTime || 0;
         const nowMs = now.getTime();
-        
+
         if (nowMs > (deadlineMs + totalPaused)) {
           console.log(`[SLA Monitor] Ticket ${ticket.number || ticketId} Resolution SLA breached!`);
-          
+
           const breachDurationMs = nowMs - (deadlineMs + totalPaused);
           const breachDuration = formatBreachDuration(breachDurationMs);
           const breachTimeslot = getBreachTimeslot(breachDurationMs);
           const startMs = new Date(ticket.resolutionSlaStartTime || ticket.firstResponseAt).getTime();
           const actualTimeMs = nowMs - startMs;
-          
+
           await fsUpdateDoc(fsDoc(firestoreDb, "tickets", ticketId), {
             resolutionSlaStatus: "Breached",
             updatedAt: nowStr
           });
-          
+
           await recordBreach({
             record_id: ticketId,
             record_type: "Ticket",
@@ -660,14 +743,14 @@ async function checkFirestoreSLABreaches() {
           });
         }
       }
-      
+
       if (ticket.responseSlaStatus === "Breached" && !ticket.firstResponseAt) {
         const deadlineMs = new Date(ticket.responseDeadline).getTime();
         const totalPaused = ticket.totalPausedTime || 0;
         const nowMs = now.getTime();
         const breachDurationMs = nowMs - (deadlineMs + totalPaused);
         const startMs = new Date(ticket.responseSlaStartTime || ticket.createdAt).getTime();
-        
+
         await recordBreach({
           record_id: ticketId,
           record_type: "Ticket",
@@ -682,14 +765,14 @@ async function checkFirestoreSLABreaches() {
           status: "active"
         });
       }
-      
+
       if (ticket.resolutionSlaStatus === "Breached" && ticket.firstResponseAt && !ticket.resolvedAt) {
         const deadlineMs = new Date(ticket.resolutionDeadline).getTime();
         const totalPaused = ticket.totalPausedTime || 0;
         const nowMs = now.getTime();
         const breachDurationMs = nowMs - (deadlineMs + totalPaused);
         const startMs = new Date(ticket.resolutionSlaStartTime || ticket.firstResponseAt).getTime();
-        
+
         await recordBreach({
           record_id: ticketId,
           record_type: "Ticket",
@@ -705,7 +788,7 @@ async function checkFirestoreSLABreaches() {
         });
       }
     }
-    
+
     const resolvedTicketsQuery = fsQuery(
       fsCollection(firestoreDb, "tickets"),
       fsWhere("status", "in", ["Resolved", "Closed"])
@@ -714,13 +797,13 @@ async function checkFirestoreSLABreaches() {
     for (const docSnap of resolvedSnapshot.docs) {
       const ticket = docSnap.data();
       const ticketId = docSnap.id;
-      
+
       if (ticket.responseSlaStatus === "Breached" && ticket.firstResponseAt) {
         const deadlineMs = new Date(ticket.responseDeadline).getTime();
         const totalPaused = ticket.totalPausedTime || 0;
         const firstResponseMs = new Date(ticket.firstResponseAt).getTime();
         const startMs = new Date(ticket.responseSlaStartTime || ticket.createdAt).getTime();
-        
+
         const finalBreachMs = firstResponseMs - (deadlineMs + totalPaused);
         if (finalBreachMs > 0) {
           await recordBreach({
@@ -738,13 +821,13 @@ async function checkFirestoreSLABreaches() {
           });
         }
       }
-      
+
       if (ticket.resolutionSlaStatus === "Breached" && ticket.resolvedAt) {
         const deadlineMs = new Date(ticket.resolutionDeadline).getTime();
         const totalPaused = ticket.totalPausedTime || 0;
         const resolvedMs = new Date(ticket.resolvedAt).getTime();
         const startMs = new Date(ticket.resolutionSlaStartTime || ticket.firstResponseAt).getTime();
-        
+
         const finalBreachMs = resolvedMs - (deadlineMs + totalPaused);
         if (finalBreachMs > 0) {
           await recordBreach({
@@ -875,6 +958,60 @@ async function escalateStaleTickets() {
 cron.schedule("*/15 * * * *", () => {
   escalateStaleTickets();
 });
+
+async function startEmailQueueWorker() {
+  console.log('[Email Queue] Worker started');
+  setInterval(async () => {
+    try {
+      const pendingEmails = await query("SELECT * FROM email_queue WHERE status = 'pending' AND direction = 'outbound' ORDER BY created_at ASC LIMIT 50");
+      if (pendingEmails.length === 0) return;
+
+      for (const email of pendingEmails) {
+        let config = null;
+        if (email.email_integration_id) {
+          const configs = await query("SELECT * FROM company_email_configs WHERE id = ?", [email.email_integration_id]);
+          if (configs.length > 0) config = configs[0];
+        }
+
+        if (!config) {
+          const defaultConfigs = await query("SELECT * FROM company_email_configs WHERE is_active = 1 ORDER BY is_default DESC LIMIT 1");
+          if (defaultConfigs.length > 0) config = defaultConfigs[0];
+        }
+
+        if (!config) {
+          console.error(`[Email Queue] No config found for email ${email.id}. Setting to failed.`);
+          await execute("UPDATE email_queue SET status = 'failed', error_message = 'No active email config found' WHERE id = ?", [email.id]);
+          continue;
+        }
+
+        try {
+          await execute("UPDATE email_queue SET status = 'processing' WHERE id = ?", [email.id]);
+
+          await OmniChannelEngine.sendEmailByConfig(config, email.recipient, email.subject, email.body, []);
+
+          await execute("UPDATE email_queue SET status = 'completed', processed_at = CURRENT_TIMESTAMP WHERE id = ?", [email.id]);
+          await execute("INSERT INTO ticket_email_activities (ticket_id, direction, sender, recipient, subject, body, status) VALUES (?, 'outbound', ?, ?, ?, ?, 'success')",
+            [email.ticket_id || 0, config.email_address, email.recipient, email.subject, email.body]);
+
+          // Add to timeline so user can see it natively
+          await execute("INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, 'email_sent', 'public', 'System', 'System', ?, ?)",
+            [email.ticket_id || 0, `Email sent to ${email.recipient}`, JSON.stringify({ from: config.email_address, to: email.recipient, subject: email.subject, body: email.body, status: 'delivered' })]
+          );
+        } catch (error: any) {
+          const attempts = (email.attempts || 0) + 1;
+          const status = attempts >= 3 ? 'failed' : 'pending';
+          await execute("UPDATE email_queue SET status = ?, attempts = ?, error_message = ? WHERE id = ?", [status, attempts, error.message, email.id]);
+          if (status === 'failed') {
+            await execute("INSERT INTO ticket_email_activities (ticket_id, direction, sender, recipient, subject, body, status) VALUES (?, 'outbound', ?, ?, ?, ?, 'failed')",
+              [email.ticket_id || 0, config.email_address, email.recipient, email.subject, email.body]);
+          }
+        }
+      }
+    } catch (error: any) {
+      console.error('[Email Queue] Worker error:', error.message);
+    }
+  }, 30000); // 30 seconds
+}
 
 async function startServer() {
   const app = express();
@@ -1176,6 +1313,56 @@ async function startServer() {
         console.error(`[SSE] Write error for user ${userId}:`, err);
       }
     });
+  }
+
+  async function enqueueTicketEmails(ticket: any, subject: string, body: string, excludeAssigned: boolean = false) {
+    try {
+      let emailIntegrationId = null;
+      if (ticket.company_id) {
+        const compRows = await query("SELECT email_integration_id FROM companies WHERE id = ?", [ticket.company_id]);
+        if (compRows.length > 0) emailIntegrationId = compRows[0].email_integration_id;
+      }
+
+      const allRecipients: string[] = [];
+      const addRecipient = (email: string) => {
+        if (email && email.includes('@')) {
+          allRecipients.push(email.trim());
+        }
+      };
+
+      console.log(`\n[Email Routing] Resolving recipients for Ticket #${ticket.ticket_number}`);
+      console.log(`Reporting User Email: ${ticket.reporting_user_email || ticket.caller_email || ticket.caller}`);
+      console.log(`Affected User Email: ${ticket.affected_user_email}`);
+
+      addRecipient(ticket.caller_email || ticket.caller);
+      addRecipient(ticket.affected_user_email);
+      addRecipient(ticket.reporting_user_email);
+
+      if (!excludeAssigned && ticket.assigned_to) {
+        const techRows = await query("SELECT email FROM users WHERE uid = ?", [ticket.assigned_to]);
+        if (techRows.length > 0 && techRows[0].email) {
+          console.log(`Assigned Technician Email: ${techRows[0].email}`);
+          addRecipient(techRows[0].email);
+        }
+      } else {
+        console.log(`Assigned Technician Email: N/A (Excluded or Unassigned)`);
+      }
+
+      // Filter to unique emails
+      const uniqueRecipients = Array.from(new Set(allRecipients));
+
+      if (uniqueRecipients.length > 0) {
+        const recipientStr = uniqueRecipients.join(", ");
+        console.log(`Recipients Resolved: [ ${recipientStr} ]`);
+
+        await execute(
+          "INSERT INTO email_queue (ticket_id, company_id, email_integration_id, direction, recipient, subject, body, status) VALUES (?, ?, ?, 'outbound', ?, ?, ?, 'pending')",
+          [ticket.id, ticket.company_id || null, emailIntegrationId, recipientStr, subject, body]
+        );
+      }
+    } catch (e) {
+      console.error("Failed to enqueue ticket emails:", e);
+    }
   }
 
   async function dispatchNotifications(ticket: any, actorId: string, actorName: string, message: string) {
@@ -2005,7 +2192,8 @@ async function startServer() {
     }
   });
 
-  app.post("/api/tickets/create", async (req, res) => {
+  // Create a new ticket (replaces legacy Firestore creation)
+  app.post("/api/tickets", async (req, res) => {
     try {
       console.log("Creating ticket with data:", JSON.stringify(req.body));
 
@@ -2107,7 +2295,11 @@ async function startServer() {
         cmdb_item: req.body.cmdbItem || null,
         subcategory: req.body.subcategory || null,
         created_at: formatDate(new Date()),
-        updated_at: formatDate(new Date())
+        updated_at: formatDate(new Date()),
+        company_id: req.body.companyId || null,
+        affected_user_email: req.body.affectedUserEmail || null,
+        reporting_user_email: req.body.reportingUserEmail || null,
+        caller_email: req.body.callerEmail || req.body.caller || null
       };
 
       for (const [key, value] of Object.entries(req.body)) {
@@ -2181,30 +2373,23 @@ async function startServer() {
       const notifMsg = `${creatorName} created a ticket and assigned it to ${assigneeName}`;
       dispatchNotifications(createdTicket, createdTicket.created_by || "System", creatorName, notifMsg);
 
-      // Send auto-acknowledgement email if caller is an email address
-      if (createdTicket.caller && createdTicket.caller.includes('@')) {
-        try {
-          await OmniChannelEngine.sendEmail(
-            createdTicket.caller,
-            `Ticket Created: ${createdTicket.ticket_number} - ${createdTicket.title}`,
-            `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
-              <h2 style="color: #2563eb;">Incident Created</h2>
-              <p>Hello,</p>
-              <p>A new support ticket has been created for you.</p>
-              <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
-                <p style="margin: 0;"><strong>Ticket Number:</strong> ${createdTicket.ticket_number}</p>
-                <p style="margin: 5px 0 0 0;"><strong>Subject:</strong> ${createdTicket.title}</p>
-                <p style="margin: 5px 0 0 0;"><strong>Priority:</strong> ${createdTicket.priority}</p>
-              </div>
-              <p>Our team is working on your request. You can track the status by replying to this email.</p>
-              <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
-              <p style="font-size: 12px; color: #64748b;">This is an automated notification from Ticklora ITSM.</p>
-            </div>`
-          );
-        } catch (mailErr: any) {
-          console.error("[Mail] Failed to send auto-ack:", mailErr.message);
-        }
-      }
+      // Send auto-acknowledgement email
+      const emailSubject = `Ticket Created: ${createdTicket.ticket_number} - ${createdTicket.title}`;
+      const emailBody = `<div style="font-family: sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 8px;">
+        <h2 style="color: #2563eb;">Incident Created</h2>
+        <p>Hello,</p>
+        <p>A new support ticket has been created.</p>
+        <div style="background-color: #f8fafc; padding: 15px; border-radius: 6px; margin: 20px 0;">
+          <p style="margin: 0;"><strong>Ticket Number:</strong> ${createdTicket.ticket_number}</p>
+          <p style="margin: 5px 0 0 0;"><strong>Subject:</strong> ${createdTicket.title}</p>
+          <p style="margin: 5px 0 0 0;"><strong>Priority:</strong> ${createdTicket.priority}</p>
+        </div>
+        <p>Our team is working on your request. You can track the status by replying to this email.</p>
+        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;">
+        <p style="font-size: 12px; color: #64748b;">This is an automated notification from Ticklora ITSM.</p>
+      </div>`;
+
+      await enqueueTicketEmails(createdTicket, emailSubject, emailBody, false);
 
       res.json({ id: ticketId.toString(), ...createdTicket });
 
@@ -2314,7 +2499,7 @@ async function startServer() {
       for (const [key, value] of Object.entries(req.body)) {
         if (ignoredKeys.has(key)) continue;
         const dbKey = keyMap[key] || key;
-        
+
         // Stringify complex objects
         if ((key === "slaDelayMeta" || key === "slaDelayLogs") && value && typeof value === "object") {
           updateData[dbKey] = JSON.stringify(value);
@@ -2364,21 +2549,56 @@ async function startServer() {
         }
       }
 
-      // Add activity entry for status/field changes
-      if (Object.keys(updateData).length > 0) {
-        let actionMsg = "Ticket updated";
-        if (req.body.status && req.body.status !== ticket.status) {
-          actionMsg = `Status changed to ${req.body.status}`;
-        } else if (req.body.assignedTo && req.body.assignedTo !== ticket.assigned_to) {
-          actionMsg = `Assigned to updated`;
-        } else if (req.body.priority && req.body.priority !== ticket.priority) {
-          actionMsg = `Priority changed to ${req.body.priority}`;
+      // Add activity entry for status/field changes using robust comparison
+      const normalize = (v: any) => {
+        if (v === null || v === undefined || v === '' || v === 'none') {
+          return null;
         }
+        return String(v).trim();
+      };
 
-        await execute(
-          "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          [id, "status_change", "public", req.body.updatedById || "System", req.body.updatedBy || "System", actionMsg, JSON.stringify({ oldStatus: ticket.status, newStatus: req.body.status, updates: updateData })]
-        );
+      const fieldsToTrack = [
+        { dbKey: "status", label: "State" },
+        { dbKey: "priority", label: "Priority" },
+        { dbKey: "impact", label: "Impact" },
+        { dbKey: "urgency", label: "Urgency" },
+        { dbKey: "assignment_group", label: "Assignment Group" },
+        { dbKey: "assigned_to", label: "Assigned To" },
+        { dbKey: "category", label: "Category" },
+        { dbKey: "subcategory", label: "Subcategory" },
+        { dbKey: "service", label: "Service" },
+        { dbKey: "company_id", label: "Company" },
+        { dbKey: "affected_user_email", label: "Affected User" },
+        { dbKey: "reporting_user_email", label: "Reporting User" }
+      ];
+
+      console.log("[DEBUG] ACTUALLY EXECUTING FIELDS CHECK!");
+      console.log("[DEBUG] updateData keys:", Object.keys(updateData));
+      console.log("[DEBUG] ticket status:", ticket.status);
+      for (const field of fieldsToTrack) {
+        if (updateData[field.dbKey] !== undefined) {
+          const oldValue = normalize(ticket[field.dbKey]);
+          const newValue = normalize(updateData[field.dbKey]);
+          
+          if (oldValue !== newValue) {
+            let actType = "field_change";
+            let actionMsg = `Changed ${field.label} from "${oldValue || 'none'}" to "${newValue || 'none'}"`;
+            
+            if (field.dbKey === "status") {
+              actType = "status_change";
+              actionMsg = `State changed to ${newValue || 'none'}`;
+            } else if (field.dbKey === "assigned_to") {
+              actType = "assignment_change";
+              actionMsg = `Assigned To changed to ${newValue || 'none'}`;
+            }
+
+            // Create individual activity for actual changes
+            await execute(
+              "INSERT INTO ticket_activities (ticket_id, activity_type, visibility_type, created_by, created_by_name, message, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?)",
+              [id, actType, "public", req.body.updatedById || "System", req.body.updatedBy || "System", actionMsg, JSON.stringify({ field: field.dbKey, oldValue, newValue })]
+            );
+          }
+        }
       }
 
       // Return updated ticket
@@ -2398,6 +2618,37 @@ async function startServer() {
             const notifMsg = `${actorName} changed ticket #${ticket.ticket_number} status from ${ticket.status} to ${req.body.status}`;
             dispatchNotifications(updatedTicket, actorId, actorName, notifMsg);
           }
+
+          const statusMap: Record<string, string> = {
+            "In Progress": "Ticket In Progress",
+            "Pending": "Ticket Pending",
+            "Resolved": "Ticket Resolved",
+            "Closed": "Ticket Closed"
+          };
+
+          let prefix = statusMap[req.body.status] || "Ticket Updated";
+          if ((ticket.status === "Closed" || ticket.status === "Resolved") && req.body.status !== "Closed" && req.body.status !== "Resolved") {
+            prefix = "Ticket Reopened";
+          }
+          const subject = `${prefix} - ${updatedTicket.ticket_number}`;
+          const body = `<p>Ticket <strong>${updatedTicket.ticket_number}</strong> status changed from <strong>${ticket.status}</strong> to <strong>${req.body.status}</strong>.</p>`;
+          await enqueueTicketEmails(updatedTicket, subject, body);
+        }
+
+        // Check Priority Change
+        if (req.body.priority && req.body.priority !== ticket.priority) {
+          const subject = `Ticket Updated - ${updatedTicket.ticket_number}`;
+          const body = `<p>Ticket <strong>${updatedTicket.ticket_number}</strong> priority changed from <strong>${ticket.priority}</strong> to <strong>${req.body.priority}</strong>.</p>
+          <p>Updated By: ${actorName}</p>
+          <p>Updated Time: ${formatDate(new Date())}</p>`;
+          await enqueueTicketEmails(updatedTicket, subject, body);
+        }
+
+        // Check Category/Subcategory Change
+        if ((req.body.category && req.body.category !== ticket.category) || (req.body.subcategory && req.body.subcategory !== ticket.subcategory)) {
+          const subject = `Ticket Updated - ${updatedTicket.ticket_number}`;
+          const body = `<p>Ticket <strong>${updatedTicket.ticket_number}</strong> category/subcategory has been updated.</p>`;
+          await enqueueTicketEmails(updatedTicket, subject, body);
         }
 
         // 2. Check assignment change
@@ -2406,6 +2657,28 @@ async function startServer() {
           const assigneeName = req.body.assignedToName || "Unassigned";
           const notifMsg = `${creatorName} assigned ticket #${ticket.ticket_number} to ${assigneeName}`;
           dispatchNotifications(updatedTicket, actorId, actorName, notifMsg);
+
+          // Queue assignment email (already uses specific body, so we call enqueueTicketEmails with excludeAssigned=true to not double send, and do specific tech send here)
+          if (req.body.assignedTo) {
+            try {
+              const techRows = await query("SELECT email FROM users WHERE uid = ?", [req.body.assignedTo]);
+              if (techRows.length > 0 && techRows[0].email) {
+                let emailIntegrationId = null;
+                if (updatedTicket.company_id) {
+                  const compRows = await query("SELECT email_integration_id FROM companies WHERE id = ?", [updatedTicket.company_id]);
+                  if (compRows.length > 0) emailIntegrationId = compRows[0].email_integration_id;
+                }
+                const subject = `Ticket Assigned: ${updatedTicket.ticket_number}`;
+                const body = `<p>Ticket <strong>${updatedTicket.ticket_number}</strong> has been assigned to you by ${actorName}.</p><p>Title: ${updatedTicket.title}</p>`;
+                await execute(
+                  "INSERT INTO email_queue (ticket_id, company_id, email_integration_id, direction, recipient, subject, body, status) VALUES (?, ?, ?, 'outbound', ?, ?, ?, 'pending')",
+                  [updatedTicket.id, updatedTicket.company_id || null, emailIntegrationId, techRows[0].email, subject, body]
+                );
+              }
+            } catch (err) {
+              console.error("Failed to queue assignment email:", err);
+            }
+          }
         }
 
         // 3. General update
@@ -2501,7 +2774,8 @@ async function startServer() {
 
   app.post("/api/users", async (req, res) => {
     try {
-      const { uid, name, email, role, phone, password_hash } = req.body;
+      const { uid, name, email, role, phone } = req.body;
+      const password_hash = req.body.password_hash || req.body.passwordHash;
 
       const result = await execute(
         "INSERT INTO users (uid, name, email, role, phone, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
@@ -2518,18 +2792,69 @@ async function startServer() {
 
   app.put("/api/users/:uid", async (req, res) => {
     try {
-      const { name, email, role, phone, is_active } = req.body;
+      const { name, email, role, phone, is_active, disabled } = req.body;
+      const isActive = disabled !== undefined ? (disabled === 1 ? 0 : 1) : is_active;
 
       await execute(
-        "UPDATE users SET name = ?, email = ?, role = ?, phone = ?, is_active = ? WHERE uid = ?",
-        [name, email, role, phone, is_active, req.params.uid]
+        "UPDATE users SET name = COALESCE(?, name), email = COALESCE(?, email), role = COALESCE(?, role), phone = COALESCE(?, phone), is_active = COALESCE(?, is_active) WHERE uid = ? OR id = ?",
+        [name, email, role, phone, isActive, req.params.uid, req.params.uid]
       );
 
-      const users = await query("SELECT * FROM users WHERE uid = ?", [req.params.uid]);
+      const users = await query("SELECT * FROM users WHERE uid = ? OR id = ?", [req.params.uid, req.params.uid]);
       res.json({ id: users[0].id.toString(), ...users[0] });
     } catch (error: any) {
       console.error("Error updating user:", error);
       res.status(500).json({ error: "Failed to update user" });
+    }
+  });
+
+  app.delete("/api/users/:uid", async (req, res) => {
+    try {
+      await execute("DELETE FROM users WHERE uid = ? OR id = ?", [req.params.uid, req.params.uid]);
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error("Error deleting user:", error);
+      res.status(500).json({ error: "Failed to delete user" });
+    }
+  });
+
+  // Settings Groups endpoints
+  app.get("/api/settings_groups", async (req, res) => {
+    try {
+      const groups = await query("SELECT * FROM settings_groups");
+      res.json(groups.map((g: any) => ({ id: g.id, ...JSON.parse(g.data || '{}') })));
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to fetch groups" });
+    }
+  });
+
+  app.post("/api/settings_groups", async (req, res) => {
+    try {
+      const { id, ...data } = req.body;
+      const docId = id || `group_${Date.now()}`;
+      await execute("INSERT INTO settings_groups (id, data) VALUES (?, ?)", [docId, JSON.stringify(data)]);
+      res.json({ id: docId, ...data });
+    } catch (error: any) {
+      console.error("Group creation failed:", error);
+      res.status(500).json({ error: "Failed to create group" });
+    }
+  });
+
+  app.put("/api/settings_groups/:id", async (req, res) => {
+    try {
+      await execute("UPDATE settings_groups SET data = ? WHERE id = ?", [JSON.stringify(req.body), req.params.id]);
+      res.json({ id: req.params.id, ...req.body });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to update group" });
+    }
+  });
+
+  app.delete("/api/settings_groups/:id", async (req, res) => {
+    try {
+      await execute("DELETE FROM settings_groups WHERE id = ?", [req.params.id]);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: "Failed to delete group" });
     }
   });
 
@@ -2550,7 +2875,40 @@ async function startServer() {
       }
 
       const normalizedEmail = email.toLowerCase().trim();
-      const users = await query("SELECT * FROM users WHERE email = ? AND is_active = 1", [normalizedEmail]);
+      let users = await query("SELECT * FROM users WHERE email = ? AND is_active = 1", [normalizedEmail]);
+
+      // Demo/Quick Access users auto-provisioning
+      const DEMO_EMAILS = [
+        "user@technosprint.net", "agent@technosprint.net", "admin@technosprint.net",
+        "ulter@technosprint.net", "arun@technosprint.net", "admin@example.com"
+      ];
+
+      if (users.length === 0 && DEMO_EMAILS.includes(normalizedEmail)) {
+        // Auto-create demo user
+        const roleMap: any = {
+          "user@technosprint.net": "user",
+          "agent@technosprint.net": "agent",
+          "admin@technosprint.net": "admin",
+          "ulter@technosprint.net": "super_admin",
+          "arun@technosprint.net": "ultra_super_admin",
+          "admin@example.com": "ultra_super_admin"
+        };
+        const nameMap: any = {
+          "user@technosprint.net": "Demo User",
+          "agent@technosprint.net": "Demo Agent",
+          "admin@technosprint.net": "Demo Admin",
+          "ulter@technosprint.net": "Demo Super Admin",
+          "arun@technosprint.net": "Arun (Ultra Admin)",
+          "admin@example.com": "System Admin"
+        };
+        const defaultHash = simpleHash(normalizedEmail === "arun@technosprint.net" ? "Poland@01" : "Password123!");
+
+        await execute(
+          "INSERT INTO users (uid, name, email, role, is_active, password_hash) VALUES (?, ?, ?, ?, 1, ?)",
+          ["demo_" + Math.random().toString(36).substring(7), nameMap[normalizedEmail], normalizedEmail, roleMap[normalizedEmail], defaultHash]
+        );
+        users = await query("SELECT * FROM users WHERE email = ? AND is_active = 1", [normalizedEmail]);
+      }
 
       if (users.length === 0) {
         return res.status(401).json({ error: "Invalid email or password" });
@@ -2559,10 +2917,10 @@ async function startServer() {
       const user = users[0];
       const calculatedHash = simpleHash(password);
 
-      const isUltraAdmin = normalizedEmail === "arun@technosprint.net";
+      const isDemoAccount = DEMO_EMAILS.includes(normalizedEmail);
       const isValidPassword =
         (user.password_hash && user.password_hash === calculatedHash) ||
-        (isUltraAdmin && (password === "Poland@01" || password === "Password123!"));
+        (isDemoAccount && (password === "Poland@01" || password === "Password123!" || password === "admin123"));
 
       if (!isValidPassword) {
         return res.status(401).json({ error: "Invalid email or password" });
@@ -2654,6 +3012,22 @@ async function startServer() {
       }
 
       const activities = await query("SELECT * FROM ticket_activities WHERE id = ?", [result.insertId]);
+
+      // Email Notification for Public Comments
+      if (visType === 'public' && (actType === 'comment' || actType === 'public_comment')) {
+        try {
+          const tRows = await query("SELECT * FROM tickets WHERE id = ?", [id]);
+          if (tRows.length > 0) {
+            const subject = `New Update on Ticket ${tRows[0].ticket_number}`;
+            const body = `<p><strong>${created_by_name || 'System'}</strong> added a comment on ticket <strong>${tRows[0].ticket_number}</strong>:</p>
+            <blockquote style="border-left: 4px solid #e2e8f0; padding-left: 15px; margin: 15px 0; color: #475569;">${message.trim()}</blockquote>`;
+            await enqueueTicketEmails(tRows[0], subject, body, true); // excludeAssigned=true for this specific requirement? User said trigger email to: Reporting User, Affected User
+          }
+        } catch (e) {
+          console.error("Failed to send public comment email:", e);
+        }
+      }
+
       res.json({ id: result.insertId.toString(), ...activities[0] });
     } catch (error: any) {
       console.error("Error adding activity:", error);
@@ -2737,7 +3111,7 @@ async function startServer() {
             }
           }
         }
-        
+
         // Fallback or complement with SQL tickets
         if (allTickets.length === 0) {
           try {
@@ -2856,15 +3230,15 @@ async function startServer() {
         // Categorize tickets into Incidents, Service Requests, and Tasks
         matchingTickets.forEach(t => {
           const isServiceRequest = (t.category && t.category.toLowerCase() === "service request") || (t.incident_category && t.incident_category.toLowerCase() === "service request");
-          
+
           // Tasks check: Active status, and assigned to the user
-          const isTask = (t.status === "New" || t.status === "Open" || t.status === "In Progress") && 
-                         (userId && (t.assigned_to === userId || (userDetails && t.assigned_to === userDetails.email)));
+          const isTask = (t.status === "New" || t.status === "Open" || t.status === "In Progress") &&
+            (userId && (t.assigned_to === userId || (userDetails && t.assigned_to === userDetails.email)));
 
           if (isTask) {
             tasksList.push(t);
           }
-          
+
           if (isServiceRequest) {
             serviceRequests.push(t);
           } else {
@@ -2887,7 +3261,7 @@ async function startServer() {
             }
           }
         }
-        
+
         // Filter by keywords
         let matchingProblems = allProblems;
         if (keywords.length > 0) {
@@ -4131,7 +4505,7 @@ Respond ONLY with JSON: {"summary": "your summary here"}`;
   // ==========================================
   // MEETING MANAGEMENT FEATURES (MOMs)
   // ==========================================
-  
+
   // Configure multer for MOM file uploads
   const momsDir = path.join(__dirname, 'public', 'uploads', 'moms');
   if (!fs.existsSync(momsDir)) {
@@ -4458,10 +4832,10 @@ Respond ONLY with JSON: {"summary": "your summary here"}`;
       if (current.length === 0) {
         return res.status(404).json({ error: 'Meeting not found' });
       }
-      
+
       await execute('DELETE FROM meetings WHERE id = ?', [id]);
       await execute('DELETE FROM meeting_audit_logs WHERE meeting_id = ?', [current[0].meeting_id]);
-      
+
       res.json({ success: true, message: 'Meeting deleted successfully' });
     } catch (error: any) {
       console.error('[Meetings API] Delete failed:', error.message);
@@ -5260,7 +5634,7 @@ Respond in a conversational, friendly tone.`,
           b.name?.trim() || "", b.contactName || "", b.phone || "", b.email || "",
           b.address1 || "", b.address2 || "", b.city || "", b.province || "",
           b.postalCode || "", b.country || "", b.website || "", b.logoUrl || "",
-          b.type || "Customer", b.status || "Active", b.email_integration_id || "",
+          b.type || "Customer", b.status || "Active", b.email_integration_id || null,
           b.primaryColor || "", b.secondaryColor || "", b.supportSignature || "",
           b.industry || "", b.priorityTier || "", b.defaultAssignmentGroup || "",
           b.defaultSlaPolicy || "", b.defaultSupportMailbox || ""
@@ -5305,7 +5679,7 @@ Respond in a conversational, friendly tone.`,
           b.email ?? old.email, b.address1 ?? old.address1, b.address2 ?? old.address2,
           b.city ?? old.city, b.province ?? old.province, b.postalCode ?? old.postal_code,
           b.country ?? old.country, b.website ?? old.website, b.logoUrl ?? old.logo_url,
-          b.type ?? old.type, b.status ?? old.status, b.email_integration_id ?? old.email_integration_id,
+          b.type ?? old.type, b.status ?? old.status, (b.email_integration_id === "" ? null : (b.email_integration_id ?? old.email_integration_id)),
           b.primaryColor ?? old.primary_color, b.secondaryColor ?? old.secondary_color,
           b.supportSignature ?? old.support_signature, b.industry ?? old.industry,
           b.priorityTier ?? old.priority_tier, b.defaultAssignmentGroup ?? old.default_assignment_group,
@@ -5624,6 +5998,85 @@ Respond in a conversational, friendly tone.`,
       // Ensure email columns exist in tickets table
       if (useSQLite) {
         const db = await getSQLiteDb();
+
+        await db.exec(`CREATE TABLE IF NOT EXISTS company_email_configs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company_name TEXT,
+          email_address TEXT,
+          smtp_host TEXT,
+          smtp_port INTEGER,
+          smtp_user TEXT,
+          smtp_pass TEXT,
+          imap_host TEXT,
+          imap_port INTEGER,
+          imap_user TEXT,
+          imap_pass TEXT,
+          encryption TEXT,
+          is_active INTEGER DEFAULT 1,
+          is_default INTEGER DEFAULT 0,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
+        await db.exec(`CREATE TABLE IF NOT EXISTS users (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          uid TEXT UNIQUE,
+          name TEXT,
+          email TEXT UNIQUE,
+          role TEXT,
+          phone TEXT,
+          is_active INTEGER DEFAULT 1,
+          password_hash TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
+        await db.exec(`CREATE TABLE IF NOT EXISTS companies (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT,
+          contact_name TEXT,
+          phone TEXT,
+          email TEXT,
+          address1 TEXT,
+          address2 TEXT,
+          city TEXT,
+          province TEXT,
+          postal_code TEXT,
+          country TEXT,
+          website TEXT,
+          logo_url TEXT,
+          type TEXT,
+          status TEXT,
+          email_integration_id INTEGER,
+          primary_color TEXT,
+          secondary_color TEXT,
+          support_signature TEXT,
+          industry TEXT,
+          priority_tier TEXT,
+          default_assignment_group TEXT,
+          default_sla_policy TEXT,
+          default_support_mailbox TEXT,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
+        await db.exec(`CREATE TABLE IF NOT EXISTS company_history (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          company_id INTEGER,
+          action TEXT,
+          field_name TEXT,
+          old_value TEXT,
+          new_value TEXT,
+          user TEXT,
+          timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
+        await db.exec(`CREATE TABLE IF NOT EXISTS settings_groups (
+          id VARCHAR(128) PRIMARY KEY,
+          data JSON,
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )`);
+
         const columns = await db.all("PRAGMA table_info(tickets)");
         const colNames = columns.map(c => c.name);
         if (!colNames.includes("affected_user_email")) {
@@ -5752,7 +6205,10 @@ Respond in a conversational, friendly tone.`,
     console.log(`Server running on http://localhost:${PORT}`);
     console.log(`[MySQL] Database: ${dbConfig.database} at ${dbConfig.host}:${dbConfig.port}`);
 
-    // OmniChannel polling GÇö initial poll on startup
+    // Start the outbound email queue worker
+    startEmailQueueWorker();
+
+    // OmniChannel polling - initial poll on startup
     console.log('[OmniChannel] Initial email poll...');
     OmniChannelEngine.pollIncomingEmails();
 

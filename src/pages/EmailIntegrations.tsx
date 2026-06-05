@@ -49,7 +49,7 @@ export function EmailIntegrations() {
   const [showModal, setShowModal] = useState(false);
   const [testing, setTesting] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [testResult, setTestResult] = useState<{success: boolean, message: string} | null>(null);
+  const [testResult, setTestResult] = useState<{ success: boolean, message: string } | null>(null);
 
   // Premium Wizard States
   const [currentStep, setCurrentStep] = useState(1);
@@ -93,7 +93,12 @@ export function EmailIntegrations() {
     try {
       const res = await fetch("/api/email-configs");
       const data = await res.json();
-      setConfigs(data);
+      if (Array.isArray(data)) {
+        setConfigs(data);
+      } else {
+        console.error("Failed to fetch email configs:", data);
+        setConfigs([]);
+      }
     } catch (e) { console.error(e); }
     setLoading(false);
   };
@@ -293,7 +298,7 @@ export function EmailIntegrations() {
                         <label htmlFor="company_name" className="text-sm font-semibold text-slate-700 block mb-2">Company Name</label>
                         <div className="relative">
                           <Building2 className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                          <input id="company_name" required placeholder="e.g. Technosprint" value={form.company_name} onChange={e => setForm(f => ({...f, company_name: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                          <input id="company_name" required placeholder="e.g. Technosprint" value={form.company_name} onChange={e => setForm(f => ({ ...f, company_name: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                         </div>
                         <p className="text-xs text-slate-500 mt-2">Enter the display or registered name of the customer company.</p>
                       </div>
@@ -301,7 +306,7 @@ export function EmailIntegrations() {
                         <label htmlFor="email_address" className="text-sm font-semibold text-slate-700 block mb-2">Support Email Address</label>
                         <div className="relative">
                           <Mail className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                          <input id="email_address" required type="email" placeholder="e.g. support@technosprint.net" value={form.email_address} onChange={e => setForm(f => ({...f, email_address: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                          <input id="email_address" required type="email" placeholder="e.g. support@technosprint.net" value={form.email_address} onChange={e => setForm(f => ({ ...f, email_address: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                         </div>
                         <p className="text-xs text-slate-500 mt-2">The primary inbox used for processing ticketing and support issues.</p>
                       </div>
@@ -313,7 +318,7 @@ export function EmailIntegrations() {
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="text-xs font-bold text-slate-400">{form.is_active === 1 ? 'ON' : 'OFF'}</span>
-                            <button id="toggle_active" type="button" onClick={() => setForm(f => ({...f, is_active: f.is_active === 1 ? 0 : 1}))} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none shadow-inner ${form.is_active === 1 ? 'bg-sn-green' : 'bg-slate-200'}`}>
+                            <button id="toggle_active" type="button" onClick={() => setForm(f => ({ ...f, is_active: f.is_active === 1 ? 0 : 1 }))} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none shadow-inner ${form.is_active === 1 ? 'bg-sn-green' : 'bg-slate-200'}`}>
                               <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${form.is_active === 1 ? 'translate-x-6' : 'translate-x-1'}`} />
                             </button>
                           </div>
@@ -326,7 +331,7 @@ export function EmailIntegrations() {
                           </div>
                           <div className="flex items-center gap-3">
                             <span className="text-xs font-bold text-slate-400">{form.is_default === 1 ? 'ON' : 'OFF'}</span>
-                            <button id="toggle_default" type="button" onClick={() => setForm(f => ({...f, is_default: f.is_default === 1 ? 0 : 1}))} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none shadow-inner ${form.is_default === 1 ? 'bg-blue-500' : 'bg-slate-200'}`}>
+                            <button id="toggle_default" type="button" onClick={() => setForm(f => ({ ...f, is_default: f.is_default === 1 ? 0 : 1 }))} className={`relative inline-flex h-7 w-12 items-center rounded-full transition-colors focus:outline-none shadow-inner ${form.is_default === 1 ? 'bg-blue-500' : 'bg-slate-200'}`}>
                               <span className={`inline-block h-5 w-5 transform rounded-full bg-white shadow-sm transition-transform ${form.is_default === 1 ? 'translate-x-6' : 'translate-x-1'}`} />
                             </button>
                           </div>
@@ -342,7 +347,7 @@ export function EmailIntegrations() {
                       {[{ id: 'TLS', label: '🔒 TLS', desc: 'Recommended for secure email transmission' }, { id: 'SSL', label: '🔐 SSL', desc: 'Alternative secure connection' }, { id: 'None', label: '⚪ None', desc: 'No encryption' }].map(opt => {
                         const isSelected = form.encryption === opt.id;
                         return (
-                          <button key={opt.id} type="button" onClick={() => setForm(f => ({...f, encryption: opt.id}))} className={`bg-white p-6 rounded-2xl border-2 text-left transition-all duration-300 focus:outline-none flex flex-col justify-between min-h-[160px] ${isSelected ? 'border-sn-green shadow-md shadow-sn-green/20 ring-2 ring-sn-green/50' : 'border-slate-100 shadow-sm hover:border-slate-300 hover:shadow-md'}`}>
+                          <button key={opt.id} type="button" onClick={() => setForm(f => ({ ...f, encryption: opt.id }))} className={`bg-white p-6 rounded-2xl border-2 text-left transition-all duration-300 focus:outline-none flex flex-col justify-between min-h-[160px] ${isSelected ? 'border-sn-green shadow-md shadow-sn-green/20 ring-2 ring-sn-green/50' : 'border-slate-100 shadow-sm hover:border-slate-300 hover:shadow-md'}`}>
                             <div className="flex items-start justify-between w-full">
                               <span className="text-xl font-bold text-slate-800">{opt.label}</span>
                               {isSelected && (
@@ -372,20 +377,20 @@ export function EmailIntegrations() {
                             <label htmlFor="smtp_host" className="text-sm font-semibold text-slate-700 block mb-2">SMTP Host</label>
                             <div className="relative">
                               <Globe className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                              <input id="smtp_host" required placeholder="smtp.gmail.com" value={form.smtp_host} onChange={e => setForm(f => ({...f, smtp_host: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                              <input id="smtp_host" required placeholder="smtp.gmail.com" value={form.smtp_host} onChange={e => setForm(f => ({ ...f, smtp_host: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                             </div>
                             <p className="text-xs text-slate-500 mt-2">Used for sending outgoing emails</p>
                           </div>
                           <div>
                             <label htmlFor="smtp_port" className="text-sm font-semibold text-slate-700 block mb-2">Port</label>
-                            <input id="smtp_port" required type="number" placeholder="587" value={form.smtp_port} onChange={e => setForm(f => ({...f, smtp_port: parseInt(e.target.value)}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                            <input id="smtp_port" required type="number" placeholder="587" value={form.smtp_port} onChange={e => setForm(f => ({ ...f, smtp_port: parseInt(e.target.value) }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                             <p className="text-xs text-slate-500 mt-2">Recommended port for TLS</p>
                           </div>
                           <div>
                             <label htmlFor="smtp_user" className="text-sm font-semibold text-slate-700 block mb-2">Username</label>
                             <div className="relative">
                               <Mail className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                              <input id="smtp_user" required placeholder="e.g. user@gmail.com" value={form.smtp_user} onChange={e => setForm(f => ({...f, smtp_user: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                              <input id="smtp_user" required placeholder="e.g. user@gmail.com" value={form.smtp_user} onChange={e => setForm(f => ({ ...f, smtp_user: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                             </div>
                             <p className="text-xs text-slate-500 mt-2">Outgoing SMTP authentication username.</p>
                           </div>
@@ -393,7 +398,7 @@ export function EmailIntegrations() {
                             <label htmlFor="smtp_pass" className="text-sm font-semibold text-slate-700 block mb-2">Password / App Password</label>
                             <div className="relative">
                               <Lock className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                              <input id="smtp_pass" required type={showSmtpPass ? "text" : "password"} placeholder="••••••••••••" value={form.smtp_pass} onChange={e => setForm(f => ({...f, smtp_pass: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-12 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                              <input id="smtp_pass" required type={showSmtpPass ? "text" : "password"} placeholder="••••••••••••" value={form.smtp_pass} onChange={e => setForm(f => ({ ...f, smtp_pass: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-12 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                               <button type="button" onClick={() => setShowSmtpPass(!showSmtpPass)} className="absolute right-4 top-3 text-slate-400 hover:text-slate-600 transition-colors focus:outline-none">
                                 {showSmtpPass ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                               </button>
@@ -412,20 +417,20 @@ export function EmailIntegrations() {
                             <label htmlFor="imap_host" className="text-sm font-semibold text-slate-700 block mb-2">IMAP Host</label>
                             <div className="relative">
                               <Globe className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                              <input id="imap_host" required placeholder="imap.gmail.com" value={form.imap_host} onChange={e => setForm(f => ({...f, imap_host: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                              <input id="imap_host" required placeholder="imap.gmail.com" value={form.imap_host} onChange={e => setForm(f => ({ ...f, imap_host: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                             </div>
                             <p className="text-xs text-slate-500 mt-2">Used for reading incoming emails</p>
                           </div>
                           <div>
                             <label htmlFor="imap_port" className="text-sm font-semibold text-slate-700 block mb-2">Port</label>
-                            <input id="imap_port" required type="number" placeholder="993" value={form.imap_port} onChange={e => setForm(f => ({...f, imap_port: parseInt(e.target.value)}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                            <input id="imap_port" required type="number" placeholder="993" value={form.imap_port} onChange={e => setForm(f => ({ ...f, imap_port: parseInt(e.target.value) }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 px-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                             <p className="text-xs text-slate-500 mt-2">Recommended port: 993 (SSL/TLS)</p>
                           </div>
                           <div>
                             <label htmlFor="imap_user" className="text-sm font-semibold text-slate-700 block mb-2">Username</label>
                             <div className="relative">
                               <Mail className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                              <input id="imap_user" required placeholder="e.g. user@gmail.com" value={form.imap_user} onChange={e => setForm(f => ({...f, imap_user: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                              <input id="imap_user" required placeholder="e.g. user@gmail.com" value={form.imap_user} onChange={e => setForm(f => ({ ...f, imap_user: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-4 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                             </div>
                             <p className="text-xs text-slate-500 mt-2">Incoming IMAP authentication username.</p>
                           </div>
@@ -433,7 +438,7 @@ export function EmailIntegrations() {
                             <label htmlFor="imap_pass" className="text-sm font-semibold text-slate-700 block mb-2">Password / App Password</label>
                             <div className="relative">
                               <Lock className="absolute left-4 top-3.5 h-5 w-5 text-slate-400" />
-                              <input id="imap_pass" required type={showImapPass ? "text" : "password"} placeholder="••••••••••••" value={form.imap_pass} onChange={e => setForm(f => ({...f, imap_pass: e.target.value}))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-12 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
+                              <input id="imap_pass" required type={showImapPass ? "text" : "password"} placeholder="••••••••••••" value={form.imap_pass} onChange={e => setForm(f => ({ ...f, imap_pass: e.target.value }))} className="w-full bg-slate-50 border border-slate-200 rounded-xl py-3 pl-12 pr-12 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-sn-green/30 focus:border-sn-green transition-all" />
                               <button type="button" onClick={() => setShowImapPass(!showImapPass)} className="absolute right-4 top-3 text-slate-400 hover:text-slate-600 transition-colors focus:outline-none">
                                 {showImapPass ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                               </button>

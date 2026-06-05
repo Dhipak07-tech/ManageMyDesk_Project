@@ -22,11 +22,11 @@ export function Groups() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isMembersModalOpen, setIsMembersModalOpen] = useState(false);
   const [selectedGroup, setSelectedGroup] = useState<any>(null);
-  
-  const INITIAL_FORM_STATE = { 
-    name: '', 
+
+  const INITIAL_FORM_STATE = {
+    name: '',
     code: '',
-    description: '', 
+    description: '',
     email: '',
     type: 'Service Desk',
     managerId: '',
@@ -50,10 +50,10 @@ export function Groups() {
   const [activeTab, setActiveTab] = useState("general");
 
   useEffect(() => {
-    const unsubGroups = onSnapshot(collection(db, "settings_groups"), snap => 
+    const unsubGroups = onSnapshot(collection(db, "settings_groups"), snap =>
       setGroups(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
-    const unsubUsers = onSnapshot(collection(db, "users"), snap => 
+    const unsubUsers = onSnapshot(collection(db, "users"), snap =>
       setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
     );
     return () => { unsubGroups(); unsubUsers(); };
@@ -62,7 +62,7 @@ export function Groups() {
     if (!form.name) return;
     try {
       const managerName = form.managerId ? users.find(u => u.id === form.managerId || u.uid === form.managerId)?.name || "" : "";
-      
+
       const groupData = {
         name: form.name,
         code: form.code,
@@ -135,19 +135,16 @@ export function Groups() {
     // Optimistic UI: Update local state immediately
     const updatedMemberIds = [...(selectedGroup.memberIds || []), userId];
     const updatedGroup = { ...selectedGroup, memberIds: updatedMemberIds, memberCount: updatedMemberIds.length };
-    
+
     // Update both main list and current selected group
     setSelectedGroup(updatedGroup);
     setGroups(prev => prev.map(g => g.id === selectedGroup.id ? updatedGroup : g));
 
     try {
       const batch = writeBatch(db);
-      batch.update(doc(db, "settings_groups", selectedGroup.id), { 
-        memberIds: arrayUnion(userId),
+      batch.update(doc(db, "settings_groups", selectedGroup.id), {
+        memberIds: updatedMemberIds,
         memberCount: updatedMemberIds.length
-      });
-      batch.update(doc(db, "users", userId), { 
-        groupIds: arrayUnion(selectedGroup.id) 
       });
       await batch.commit();
     } catch (e) {
@@ -161,18 +158,15 @@ export function Groups() {
     // Optimistic UI: Update local state immediately
     const updatedMemberIds = (selectedGroup.memberIds || []).filter((id: string) => id !== userId);
     const updatedGroup = { ...selectedGroup, memberIds: updatedMemberIds, memberCount: updatedMemberIds.length };
-    
+
     setSelectedGroup(updatedGroup);
     setGroups(prev => prev.map(g => g.id === selectedGroup.id ? updatedGroup : g));
 
     try {
       const batch = writeBatch(db);
-      batch.update(doc(db, "settings_groups", selectedGroup.id), { 
-        memberIds: arrayRemove(userId),
+      batch.update(doc(db, "settings_groups", selectedGroup.id), {
+        memberIds: updatedMemberIds,
         memberCount: updatedMemberIds.length
-      });
-      batch.update(doc(db, "users", userId), { 
-        groupIds: arrayRemove(selectedGroup.id) 
       });
       await batch.commit();
     } catch (e) {
@@ -284,20 +278,20 @@ export function Groups() {
 
             {/* Actions */}
             <div className="px-5 py-3 bg-muted/5 border-t border-border flex justify-between items-center group-hover:bg-muted/10 transition-colors">
-              <button 
-                onClick={() => { setSelectedGroup(group); setIsMembersModalOpen(true); }} 
+              <button
+                onClick={() => { setSelectedGroup(group); setIsMembersModalOpen(true); }}
                 className="text-sn-green text-[11px] hover:underline font-black flex items-center gap-1.5 uppercase tracking-wider"
               >
                 <UsersIcon className="w-3.5 h-3.5" /> Manage Queue
               </button>
               <div className="flex items-center gap-1">
-                <button 
-                  onClick={() => { 
-                    setSelectedGroup(group); 
+                <button
+                  onClick={() => {
+                    setSelectedGroup(group);
                     setForm({
-                      name: group.name, 
+                      name: group.name,
                       code: group.code || '',
-                      description: group.description, 
+                      description: group.description,
                       email: group.email || '',
                       type: group.type || 'Service Desk',
                       managerId: group.managerId || '',
@@ -313,17 +307,17 @@ export function Groups() {
                       queueCapacity: group.queueCapacity || 50,
                       region: group.region || 'Global',
                       status: group.status || 'active'
-                    }); 
-                    setIsModalOpen(true); 
+                    });
+                    setIsModalOpen(true);
                     setActiveTab("general");
-                  }} 
+                  }}
                   className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors"
                   title="Edit Group"
                 >
                   <Edit2 className="w-4 h-4" />
                 </button>
-                <button 
-                  onClick={() => handleDelete(group)} 
+                <button
+                  onClick={() => handleDelete(group)}
                   className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
                   title="Delete Group"
                 >
@@ -350,7 +344,7 @@ export function Groups() {
               </div>
               <button onClick={() => setIsModalOpen(false)} className="p-1.5 hover:bg-muted rounded-full transition-colors"><X className="w-5 h-5" /></button>
             </div>
-            
+
             {/* Tabs */}
             <div className="flex border-b border-border bg-muted/5">
               {[
@@ -358,7 +352,7 @@ export function Groups() {
                 { id: 'operations', label: 'Operations', icon: <Zap className="w-3.5 h-3.5" /> },
                 { id: 'routing', label: 'Routing & Escalation', icon: <BarChart3 className="w-3.5 h-3.5" /> }
               ].map(tab => (
-                <button 
+                <button
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={cn(
@@ -378,16 +372,16 @@ export function Groups() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Group Name</label>
-                      <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none transition-all" placeholder="e.g. Network Team" />
+                      <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none transition-all" placeholder="e.g. Network Team" />
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Group Code</label>
-                      <input value={form.code} onChange={e => setForm({...form, code: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm font-mono text-sn-dark focus:ring-2 focus:ring-sn-green outline-none transition-all" placeholder="e.g. GRP_NET" />
+                      <input value={form.code} onChange={e => setForm({ ...form, code: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm font-mono text-sn-dark focus:ring-2 focus:ring-sn-green outline-none transition-all" placeholder="e.g. GRP_NET" />
                     </div>
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Group Type</label>
-                    <select value={form.type} onChange={e => setForm({...form, type: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
+                    <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
                       {GROUP_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
                   </div>
@@ -396,12 +390,12 @@ export function Groups() {
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Group Email</label>
                       <div className="relative">
                         <Mail className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="group@company.com" />
+                        <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="group@company.com" />
                       </div>
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Manager</label>
-                      <select value={form.managerId} onChange={e => setForm({...form, managerId: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
+                      <select value={form.managerId} onChange={e => setForm({ ...form, managerId: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
                         <option value="">-- Unassigned --</option>
                         {users.filter(u => u.role === 'agent' || u.role === 'admin' || u.role === 'sub_admin' || u.role === 'super_admin' || u.role === 'ultra_super_admin').map(u => (
                           <option key={u.id} value={u.id}>{u.name || u.email}</option>
@@ -411,7 +405,7 @@ export function Groups() {
                   </div>
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Description</label>
-                    <textarea value={form.description} onChange={e => setForm({...form, description: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm h-24 text-sn-dark focus:ring-2 focus:ring-sn-green outline-none resize-none" placeholder="Enter group purpose and scope..." />
+                    <textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm h-24 text-sn-dark focus:ring-2 focus:ring-sn-green outline-none resize-none" placeholder="Enter group purpose and scope..." />
                   </div>
                 </div>
               )}
@@ -423,14 +417,14 @@ export function Groups() {
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Business Hours</label>
                       <div className="relative">
                         <Clock className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input value={form.businessHours} onChange={e => setForm({...form, businessHours: e.target.value})} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. 09:00 - 18:00" />
+                        <input value={form.businessHours} onChange={e => setForm({ ...form, businessHours: e.target.value })} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. 09:00 - 18:00" />
                       </div>
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Timezone</label>
                       <div className="relative">
                         <Globe className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input value={form.timezone} onChange={e => setForm({...form, timezone: e.target.value})} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. IST (UTC+5:30)" />
+                        <input value={form.timezone} onChange={e => setForm({ ...form, timezone: e.target.value })} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. IST (UTC+5:30)" />
                       </div>
                     </div>
                   </div>
@@ -439,12 +433,12 @@ export function Groups() {
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Region/Location</label>
                       <div className="relative">
                         <MapPin className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                        <input value={form.region} onChange={e => setForm({...form, region: e.target.value})} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. APAC, EMEA" />
+                        <input value={form.region} onChange={e => setForm({ ...form, region: e.target.value })} className="w-full border border-border rounded-lg pl-10 p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. APAC, EMEA" />
                       </div>
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Queue Capacity</label>
-                      <input type="number" value={form.queueCapacity} onChange={e => setForm({...form, queueCapacity: Number(e.target.value)})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" />
+                      <input type="number" value={form.queueCapacity} onChange={e => setForm({ ...form, queueCapacity: Number(e.target.value) })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" />
                     </div>
                   </div>
                   <div>
@@ -452,7 +446,7 @@ export function Groups() {
                     <div className="flex gap-4">
                       {['active', 'inactive'].map(s => (
                         <label key={s} className="flex items-center gap-2 cursor-pointer">
-                          <input type="radio" checked={form.status === s} onChange={() => setForm({...form, status: s})} className="w-4 h-4 text-sn-green focus:ring-sn-green" />
+                          <input type="radio" checked={form.status === s} onChange={() => setForm({ ...form, status: s })} className="w-4 h-4 text-sn-green focus:ring-sn-green" />
                           <span className="text-sm capitalize text-sn-dark font-medium">{s}</span>
                         </label>
                       ))}
@@ -471,14 +465,14 @@ export function Groups() {
                           <span className="text-xs font-bold text-sn-dark">Auto-Assignment</span>
                           <span className="text-[10px] text-muted-foreground">Automatically route new tickets to this group</span>
                         </div>
-                        <input type="checkbox" checked={form.autoAssignmentEnabled} onChange={e => setForm({...form, autoAssignmentEnabled: e.target.checked})} className="w-5 h-5 rounded text-sn-green focus:ring-sn-green" />
+                        <input type="checkbox" checked={form.autoAssignmentEnabled} onChange={e => setForm({ ...form, autoAssignmentEnabled: e.target.checked })} className="w-5 h-5 rounded text-sn-green focus:ring-sn-green" />
                       </label>
                       <label className="flex items-center justify-between p-3 bg-white border border-border rounded-lg cursor-pointer hover:border-sn-green/50 transition-all">
                         <div className="flex flex-col">
                           <span className="text-xs font-bold text-sn-dark">Round Robin</span>
                           <span className="text-[10px] text-muted-foreground">Distribute tickets evenly among available members</span>
                         </div>
-                        <input type="checkbox" checked={form.roundRobinEnabled} onChange={e => setForm({...form, roundRobinEnabled: e.target.checked})} className="w-5 h-5 rounded text-sn-green focus:ring-sn-green" />
+                        <input type="checkbox" checked={form.roundRobinEnabled} onChange={e => setForm({ ...form, roundRobinEnabled: e.target.checked })} className="w-5 h-5 rounded text-sn-green focus:ring-sn-green" />
                       </label>
                     </div>
                   </div>
@@ -486,7 +480,7 @@ export function Groups() {
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Escalation Group</label>
-                      <select value={form.escalationGroupId} onChange={e => setForm({...form, escalationGroupId: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
+                      <select value={form.escalationGroupId} onChange={e => setForm({ ...form, escalationGroupId: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
                         <option value="">-- None --</option>
                         {groups.filter(g => g.id !== selectedGroup?.id).map(g => (
                           <option key={g.id} value={g.id}>{g.name}</option>
@@ -495,7 +489,7 @@ export function Groups() {
                     </div>
                     <div>
                       <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Default Assignee</label>
-                      <select value={form.defaultAssigneeId} onChange={e => setForm({...form, defaultAssigneeId: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
+                      <select value={form.defaultAssigneeId} onChange={e => setForm({ ...form, defaultAssigneeId: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none h-11">
                         <option value="">-- Unassigned --</option>
                         {users.filter(u => (selectedGroup?.memberIds || []).includes(u.id)).map(u => (
                           <option key={u.id} value={u.id}>{u.name || u.email}</option>
@@ -506,7 +500,7 @@ export function Groups() {
 
                   <div>
                     <label className="block text-[10px] font-black uppercase tracking-widest text-muted-foreground mb-1.5">Required Skill Tags (Comma separated)</label>
-                    <input value={form.skillTags} onChange={e => setForm({...form, skillTags: e.target.value})} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. SAP, Azure, Firewall, Security" />
+                    <input value={form.skillTags} onChange={e => setForm({ ...form, skillTags: e.target.value })} className="w-full border border-border rounded-lg p-2.5 text-sm text-sn-dark focus:ring-2 focus:ring-sn-green outline-none" placeholder="e.g. SAP, Azure, Firewall, Security" />
                   </div>
                 </div>
               )}
@@ -553,9 +547,9 @@ export function Groups() {
                 </div>
                 <div className="relative mb-4">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input 
-                    type="text" 
-                    placeholder="Filter current members..." 
+                  <input
+                    type="text"
+                    placeholder="Filter current members..."
                     value={memberSearch}
                     onChange={e => setMemberSearch(e.target.value)}
                     className="w-full pl-9 pr-4 py-2 bg-white border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-sn-green"
@@ -571,12 +565,12 @@ export function Groups() {
                           <div className="flex items-center gap-3">
                             <div className="relative">
                               <div className="w-10 h-10 rounded-full bg-sn-dark/5 flex items-center justify-center text-xs font-bold text-sn-dark uppercase">
-                                {u.name?.split(' ').map((n:string) => n[0]).join('') || u.email[0]}
+                                {u.name?.split(' ').map((n: string) => n[0]).join('') || u.email[0]}
                               </div>
                               <div className={cn(
                                 "absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white",
-                                u.availabilityStatus === 'available' ? "bg-emerald-500" : 
-                                u.availabilityStatus === 'away' ? "bg-amber-500" : "bg-gray-300"
+                                u.availabilityStatus === 'available' ? "bg-emerald-500" :
+                                  u.availabilityStatus === 'away' ? "bg-amber-500" : "bg-gray-300"
                               )} />
                             </div>
                             <div>
@@ -587,8 +581,8 @@ export function Groups() {
                               <div className="text-[10px] text-muted-foreground font-medium">{u.email}</div>
                             </div>
                           </div>
-                          <button 
-                            onClick={() => handleRemoveMember(u.id)} 
+                          <button
+                            onClick={() => handleRemoveMember(u.id)}
                             className="text-muted-foreground hover:text-red-600 p-1 rounded-md transition-colors"
                             title="Remove from group"
                           >
@@ -599,7 +593,7 @@ export function Groups() {
                         <div className="grid grid-cols-2 gap-3 mt-1 pt-3 border-t border-border/50">
                           <div>
                             <p className="text-[9px] text-muted-foreground uppercase font-black mb-1">Group Role</p>
-                            <select 
+                            <select
                               className="w-full bg-muted/30 border border-border rounded-md px-2 py-1 text-[10px] font-bold text-sn-dark outline-none focus:ring-1 focus:ring-sn-green"
                               defaultValue={u.roleInGroup || "Support Agent"}
                             >
@@ -633,9 +627,9 @@ export function Groups() {
                 </div>
                 <div className="relative mb-4">
                   <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                  <input 
-                    type="text" 
-                    placeholder="Search available users..." 
+                  <input
+                    type="text"
+                    placeholder="Search available users..."
                     value={availableSearch}
                     onChange={e => setAvailableSearch(e.target.value)}
                     className="w-full pl-9 pr-4 py-2 bg-white border border-border rounded-lg text-xs outline-none focus:ring-2 focus:ring-sn-green"
@@ -646,14 +640,14 @@ export function Groups() {
                     .filter(u => !(selectedGroup.memberIds || []).includes(u.id))
                     .filter(u => !availableSearch || u.name?.toLowerCase().includes(availableSearch.toLowerCase()) || u.email?.toLowerCase().includes(availableSearch.toLowerCase()))
                     .map(u => (
-                      <div 
-                        key={u.id} 
+                      <div
+                        key={u.id}
                         className="group flex justify-between items-center p-3 bg-white border border-border rounded-lg hover:border-sn-green/50 hover:bg-sn-green/5 cursor-pointer transition-all shadow-sm"
                         onClick={() => handleAddMember(u.id)}
                       >
                         <div className="flex items-center gap-3">
                           <div className="w-8 h-8 rounded-full bg-sn-green/10 flex items-center justify-center text-[10px] font-bold text-sn-green uppercase">
-                            {u.name?.split(' ').map((n:string) => n[0]).join('') || u.email[0]}
+                            {u.name?.split(' ').map((n: string) => n[0]).join('') || u.email[0]}
                           </div>
                           <div>
                             <div className="text-sm font-semibold text-sn-dark">{u.name || u.email}</div>

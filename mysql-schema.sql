@@ -462,3 +462,41 @@ CREATE TABLE IF NOT EXISTS incident_categories (
     INDEX idx_name (name),
     INDEX idx_status (status)
 ) ENGINE=InnoDB;
+
+-- ============================================================
+-- EMAIL QUEUE TABLE (For background outbound email processing)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS email_queue (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT,
+    company_id INT,
+    email_integration_id INT,
+    direction ENUM('outbound', 'inbound') DEFAULT 'outbound',
+    recipient VARCHAR(255),
+    subject VARCHAR(255),
+    body TEXT,
+    status ENUM('pending', 'processing', 'completed', 'failed') DEFAULT 'pending',
+    attempts INT DEFAULT 0,
+    error_message TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMP NULL,
+    INDEX idx_status (status),
+    INDEX idx_ticket (ticket_id)
+) ENGINE=InnoDB;
+
+-- ============================================================
+-- TICKET EMAIL ACTIVITIES TABLE (Audit trail for emails)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS ticket_email_activities (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    ticket_id INT NOT NULL,
+    direction ENUM('inbound', 'outbound'),
+    sender VARCHAR(255),
+    recipient VARCHAR(255),
+    subject VARCHAR(255),
+    body TEXT,
+    status ENUM('success', 'failed', 'pending'),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE,
+    INDEX idx_ticket_id (ticket_id)
+) ENGINE=InnoDB;

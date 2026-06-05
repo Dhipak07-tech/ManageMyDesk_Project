@@ -149,6 +149,7 @@ export function Tickets() {
   const [newTicket, setNewTicket] = useState({
     ...CREATE_INCIDENT_FORM_DEFAULTS,
     caller: profile?.name || user?.email || "",
+    callerEmail: user?.email || "",
     incidentCategory: ""
   });
 
@@ -160,14 +161,14 @@ export function Tickets() {
   const selectedSubcategoryData = realisticSubcategories.find(s => s.name === newTicket.subcategory);
   const realisticServices = selectedSubcategoryData?.services || [];
 
-  const visibleGroups = groups.filter(g => g.status === 'active');
+  const visibleGroups = groups;
   const displayGroups = visibleGroups;
 
-  // DYNAMIC GROUP FILTERING (Requirement: Only users belonging to the selected group)
+  // DYNAMIC GROUP FILTERING (Requirement: Only users belonging to the selected group, or all agents if no group selected)
   const selectedGroupObj = groups.find(g => g.name === newTicket.assignmentGroup);
-  const visibleMembers = allUsers.filter(u =>
-    selectedGroupObj?.memberIds?.includes(u.id)
-  );
+  const visibleMembers = selectedGroupObj?.memberIds
+    ? allUsers.filter(u => selectedGroupObj.memberIds?.includes(u.id) || selectedGroupObj.memberIds?.includes(u.uid))
+    : agents;
 
   // Realistic Catalog initialization handled via state defaults
 
@@ -526,70 +527,49 @@ export function Tickets() {
 
       console.log("Final ticket data payload:", ticketData);
 
-      const docRef = await addDoc(collection(db, "tickets"), ticketData);
-      console.log("Ticket created successfully with ID:", docRef.id);
+      // Construct API payload matching POST /api/tickets
+      const apiPayload = {
+        title: newTicket.title,
+        description: newTicket.description,
+        caller: newTicket.caller || user?.email || "",
+        callerEmail: newTicket.callerEmail || user?.email || "",
+        incidentCategory: newTicket.incidentCategory,
+        subcategory: newTicket.subcategory,
+        service: newTicket.service,
+        serviceOffering: newTicket.serviceOffering,
+        cmdbItem: newTicket.cmdbItem,
+        status: newTicket.status || "New",
+        priority: newTicket.priority || "4 - Low",
+        impact: newTicket.impact || "3 - Low",
+        urgency: newTicket.urgency || "3 - Low",
+        channel: newTicket.channel || "Self-service",
+        assignmentGroup: newTicket.assignmentGroup,
+        assignedTo: newTicket.assignedTo,
+        assignedToName: assignedUserName,
+        createdBy: user?.uid,
+        createdByName: profile?.name || user?.email || "",
+        companyId: newTicket.companyId,
+        affectedUser: newTicket.affectedUser,
+        affectedUserEmail: newTicket.affectedUserEmail,
+        reportingUserEmail: newTicket.callerEmail,
+        customFields: newTicket.customFields
+      };
 
-      // Save custom dynamic dropdown selections in database
-      if (newTicket.customFields && Object.keys(newTicket.customFields).length > 0) {
-        try {
-          await fetch(`/api/tickets/${docRef.id}/custom-fields`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ customFields: newTicket.customFields })
-          });
-        } catch (e) {
-          console.error("Error saving dynamic custom fields:", e);
-        }
-      }
+      console.log("Sending ticket creation payload to API:", apiPayload);
 
-      // Dispatch real-time notification
-      try {
-        fetch("/api/notifications/dispatch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ticket: {
-              id: docRef.id,
-              ticket_number: ticketNumber,
-              created_by: user.uid,
-              created_by_name: profile?.name || user.email,
-              assigned_to: newTicket.assignedTo || null,
-              assigned_to_name: assignedUserName || null,
-              status: ticketData.status,
-              priority: priority
-            },
-            actorId: user.uid,
-            actorName: profile?.name || user.email,
-            type: "create"
-          })
-        });
-      } catch (e) {
-        console.error("Failed to dispatch creation notification:", e);
+      const res = await fetch("/api/tickets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(apiPayload)
+      });
+      
+      if (!res.ok) {
+        throw new Error("Failed to create ticket via API: " + await res.text());
       }
-
-      // Log creation to activity timeline (Unified Activity Stream)
-      try {
-        await fetch(`/api/tickets/${docRef.id}/activities`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            activity_type: 'system',
-            visibility_type: 'public',
-            created_by: user.uid,
-            created_by_name: profile?.name || user.email,
-            message: `Ticket Created by ${profile?.name || user.email}`,
-            metadata_json: {
-              priority,
-              category: newTicket.category,
-              assignmentGroup,
-              status: ticketData.status,
-              shortDescription: newTicket.title
-            }
-          })
-        });
-      } catch (e) {
-        console.error("Failed to log creation activity:", e);
-      }
+      
+      const createdData = await res.json();
+      const ticketId = createdData.id;
+      console.log("Ticket created successfully with ID:", ticketId);
 
       closeModal();
       alert(`Ticket ${ticketNumber} has been created successfully.`);
@@ -1110,7 +1090,7 @@ export function Tickets() {
                                   key={u.id}
                                   className="p-2 hover:bg-sn-green/10 cursor-pointer text-xs"
                                   onClick={() => {
-                                    setNewTicket({ ...newTicket, caller: u.name || u.email });
+                                    setNewTicket({ ...newTicket, caller: u.name || u.email, callerEmail: u.email || "" });
                                     setCallerSearch(u.name || u.email);
                                     setShowCallerResults(false);
                                   }}
@@ -1170,7 +1150,7 @@ export function Tickets() {
                                   key={u.id}
                                   className="p-2 hover:bg-sn-green/10 cursor-pointer text-xs"
                                   onClick={() => {
-                                    setNewTicket({ ...newTicket, affectedUser: u.name || u.email });
+                                    setNewTicket({ ...newTicket, affectedUser: u.name || u.email, affectedUserEmail: u.email || "" });
                                     setAffectedSearch(u.name || u.email);
                                     setShowAffectedResults(false);
                                   }}

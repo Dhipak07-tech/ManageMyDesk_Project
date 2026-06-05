@@ -41,17 +41,17 @@ function notifyListeners(path: string, id?: string) {
 // Fallback Objects for query building
 export class FallbackCollectionReference {
   type = "collection" as const;
-  constructor(public db: any, public path: string) {}
+  constructor(public db: any, public path: string) { }
 }
 
 export class FallbackQuery {
   type = "query" as const;
-  constructor(public collectionRef: FallbackCollectionReference, public clauses: any[] = []) {}
+  constructor(public collectionRef: FallbackCollectionReference, public clauses: any[] = []) { }
 }
 
 export class FallbackDocumentReference {
   type = "document" as const;
-  constructor(public db: any, public path: string, public id: string) {}
+  constructor(public db: any, public path: string, public id: string) { }
 }
 
 // Map db ticket to frontend camelCase
@@ -104,7 +104,7 @@ function mapDbTicketToFrontend(t: any): any {
 
 async function fetchFallbackData(path: string, queryObj?: any): Promise<any[]> {
   console.log(`[Firestore Fallback] Fetching data for path: "${path}"`);
-  
+
   try {
     if (path.startsWith("tickets")) {
       // Check if resolved query
@@ -118,14 +118,14 @@ async function fetchFallbackData(path: string, queryObj?: any): Promise<any[]> {
           }
         }
       }
-      
+
       const url = isResolvedQuery ? "/api/tickets/resolved" : "/api/tickets/open";
       const res = await fetch(url);
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       const dbTickets = await res.json();
       return dbTickets.map(mapDbTicketToFrontend);
     }
-    
+
     if (path === "users") {
       const res = await fetch("/api/users");
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
@@ -136,10 +136,17 @@ async function fetchFallbackData(path: string, queryObj?: any): Promise<any[]> {
         name: u.name || "",
         email: u.email || "",
         role: u.role || "user",
-        phone: u.phone || ""
+        phone: u.phone || "",
+        passwordHash: u.password_hash || ""
       }));
     }
-    
+
+    if (path === "settings_groups") {
+      const res = await fetch("/api/settings_groups");
+      if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
+      return await res.json();
+    }
+
     if (path === "sla_breaches") {
       let url = "/api/sla-breaches/all";
       if (queryObj && queryObj.clauses) {
@@ -152,7 +159,7 @@ async function fetchFallbackData(path: string, queryObj?: any): Promise<any[]> {
       if (!res.ok) throw new Error(`HTTP error: ${res.status}`);
       return await res.json();
     }
-    
+
     if (path === "sla_policies") {
       return [
         { id: "p1", name: "P1 SLA", priority: "1 - Critical", category: "", resolutionTimeMinutes: 240, isActive: true },
@@ -161,13 +168,13 @@ async function fetchFallbackData(path: string, queryObj?: any): Promise<any[]> {
         { id: "p4", name: "P4 SLA", priority: "4 - Low", category: "", resolutionTimeMinutes: 4320, isActive: true }
       ];
     }
-    
+
     if (path === "companies") {
       const res = await fetch("/api/companies");
       if (!res.ok) return [];
       return await res.json();
     }
-    
+
     if (path.includes("/comments")) {
       const parts = path.split("/");
       const ticketId = parts[1];
@@ -179,7 +186,7 @@ async function fetchFallbackData(path: string, queryObj?: any): Promise<any[]> {
   } catch (err) {
     console.error(`[Firestore Fallback] Error fetching path "${path}":`, err);
   }
-  
+
   return [];
 }
 
@@ -280,13 +287,28 @@ export async function getDocs(queryObj: any): Promise<any> {
   if (firestoreExhausted || (queryObj && (queryObj.type === "query" || queryObj.type === "collection"))) {
     const path = queryObj.type === "query" ? queryObj.collectionRef.path : queryObj.path;
     const dataList = await fetchFallbackData(path, queryObj);
-    
-    const docs = dataList.map(item => ({
+
+    let filteredData = dataList;
+    if (queryObj && queryObj.clauses) {
+      for (const clause of queryObj.clauses) {
+        if (clause.type === "where") {
+          filteredData = filteredData.filter((item: any) => {
+            const itemVal = item[clause.field];
+            if (clause.op === "==") return itemVal === clause.value;
+            if (clause.op === "in") return Array.isArray(clause.value) && clause.value.includes(itemVal);
+            if (clause.op === "array-contains") return Array.isArray(itemVal) && itemVal.includes(clause.value);
+            return true;
+          });
+        }
+      }
+    }
+
+    const docs = filteredData.map(item => ({
       id: String(item.id),
       data: () => item,
       exists: () => true
     }));
-    
+
     return {
       docs,
       empty: docs.length === 0,
@@ -296,7 +318,7 @@ export async function getDocs(queryObj: any): Promise<any> {
       }
     };
   }
-  
+
   try {
     return await realFS.getDocs(queryObj);
   } catch (err: any) {
@@ -319,7 +341,7 @@ export async function getDoc(docRef: any): Promise<any> {
       path = parts.slice(0, -1).join("/");
     }
     let data: any = null;
-    
+
     try {
       if (path === "settings" && id === "branding") {
         const stored = localStorage.getItem("fallback_firestore_settings/branding");
@@ -347,14 +369,14 @@ export async function getDoc(docRef: any): Promise<any> {
     } catch (e) {
       console.error("[Firestore Fallback] getDoc error:", e);
     }
-    
+
     return {
       id: id,
       exists: () => data !== null,
       data: () => data
     };
   }
-  
+
   try {
     return await realFS.getDoc(docRef);
   } catch (err: any) {
@@ -377,11 +399,11 @@ export function onSnapshot(
   onError?: (error: any) => void
 ): () => void {
   const isDoc = queryOrDoc && (queryOrDoc.type === "document" || queryOrDoc instanceof realFS.DocumentReference);
-  
+
   if (firestoreExhausted || (queryOrDoc && (queryOrDoc.type === "query" || queryOrDoc.type === "collection" || queryOrDoc.type === "document"))) {
     let active = true;
     let timerId: any = null;
-    
+
     const runPoll = async () => {
       if (!active) return;
       try {
@@ -397,10 +419,10 @@ export function onSnapshot(
         if (active && onError) onError(err);
       }
     };
-    
+
     runPoll();
     timerId = setInterval(runPoll, 5000);
-    
+
     const listenerRecord = {
       queryOrDoc,
       onNext,
@@ -408,7 +430,7 @@ export function onSnapshot(
       trigger: runPoll
     };
     activeListeners.push(listenerRecord);
-    
+
     return () => {
       active = false;
       if (timerId) clearInterval(timerId);
@@ -416,7 +438,7 @@ export function onSnapshot(
       if (idx !== -1) activeListeners.splice(idx, 1);
     };
   }
-  
+
   let unsub: () => void;
   try {
     unsub = realFS.onSnapshot(
@@ -436,7 +458,7 @@ export function onSnapshot(
         }
       }
     );
-    
+
     return () => {
       if (unsub) unsub();
     };
@@ -451,21 +473,29 @@ export async function addDoc(collectionRef: any, data: any): Promise<any> {
   if (firestoreExhausted || (collectionRef && collectionRef.type === "collection")) {
     const path = collectionRef.path;
     console.log(`[Firestore Fallback] addDoc to "${path}":`, data);
-    
+
     if (path === "tickets") {
       const res = await fetch("/api/tickets/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
+        body: JSON.stringify({
+          ...data,
+          caller: data.caller || "System",
+          incidentCategory: data.incidentCategory || data.incident_category,
+          createdByName: data.createdByName || data.caller || "System",
+          customFields: data.customFields || {},
+          slaDelayMeta: data.slaDelayMeta || null,
+          slaDelayLogs: data.slaDelayLogs || []
+        })
       });
       if (!res.ok) throw new Error("Failed to create ticket via fallback API");
       const created = await res.json();
       return { id: String(created.id) };
     }
-    
+
     return { id: "mock_id_" + Date.now() };
   }
-  
+
   try {
     return await realFS.addDoc(collectionRef, data);
   } catch (err: any) {
@@ -487,7 +517,7 @@ export async function updateDoc(docRef: any, data: any): Promise<void> {
       path = parts.slice(0, -1).join("/");
     }
     console.log(`[Firestore Fallback] updateDoc on "${path}/${id}":`, data);
-    
+
     if (path === "tickets") {
       const payload = { ...data };
       if (payload.slaDelayMeta !== undefined) {
@@ -505,10 +535,17 @@ export async function updateDoc(docRef: any, data: any): Promise<void> {
       });
       if (!res.ok) throw new Error("Failed to update ticket via fallback API");
       return;
+    } else if (path === "settings_groups") {
+      await fetch(`/api/settings_groups/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      return;
     }
     return;
   }
-  
+
   try {
     await realFS.updateDoc(docRef, data);
   } catch (err: any) {
@@ -530,12 +567,18 @@ export async function setDoc(docRef: any, data: any, options?: any): Promise<voi
       path = parts.slice(0, -1).join("/");
     }
     console.log(`[Firestore Fallback] setDoc on "${path}/${id}":`, data, options);
-    
+
     if (path === "users") {
       await fetch("/api/users", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(data)
+      });
+    } else if (path === "settings_groups") {
+      await fetch("/api/settings_groups", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, ...data })
       });
     } else if (path === "settings" && id === "branding") {
       const stored = localStorage.getItem("fallback_firestore_settings/branding");
@@ -543,7 +586,7 @@ export async function setDoc(docRef: any, data: any, options?: any): Promise<voi
       if (stored) {
         try {
           currentData = JSON.parse(stored);
-        } catch {}
+        } catch { }
       }
       const newData = { ...currentData, ...data };
       localStorage.setItem("fallback_firestore_settings/branding", JSON.stringify(newData));
@@ -551,7 +594,7 @@ export async function setDoc(docRef: any, data: any, options?: any): Promise<voi
     }
     return;
   }
-  
+
   try {
     await realFS.setDoc(docRef, data, options);
   } catch (err: any) {
@@ -573,17 +616,22 @@ export async function deleteDoc(docRef: any): Promise<void> {
       path = parts.slice(0, -1).join("/");
     }
     console.log(`[Firestore Fallback] deleteDoc on "${path}/${id}"`);
-    
+
     if (path === "tickets") {
       const res = await fetch(`/api/tickets/${id}`, {
         method: "DELETE"
       });
       if (!res.ok) throw new Error("Failed to delete ticket via fallback API");
       return;
+    } else if (path === "settings_groups") {
+      await fetch(`/api/settings_groups/${id}`, {
+        method: "DELETE"
+      });
+      return;
     }
     return;
   }
-  
+
   try {
     await realFS.deleteDoc(docRef);
   } catch (err: any) {
@@ -606,13 +654,20 @@ export function increment(n: number) {
   return realFS.increment(n);
 }
 
-export function writeBatch(db: any) {
+export function writeBatch(db: any): any {
   if (firestoreExhausted) {
+    const operations: any[] = [];
     return {
-      set: () => {},
-      update: () => {},
-      delete: () => {},
-      commit: async () => {}
+      set: (docRef: any, data: any, options?: any) => operations.push({ type: 'set', docRef, data, options }),
+      update: (docRef: any, data: any) => operations.push({ type: 'update', docRef, data }),
+      delete: (docRef: any) => operations.push({ type: 'delete', docRef }),
+      commit: async () => {
+        for (const op of operations) {
+          if (op.type === 'set') await setDoc(op.docRef, op.data, op.options);
+          else if (op.type === 'update') await updateDoc(op.docRef, op.data);
+          else if (op.type === 'delete') await deleteDoc(op.docRef);
+        }
+      }
     };
   }
   return realFS.writeBatch(db);

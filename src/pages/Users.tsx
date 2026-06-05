@@ -40,10 +40,20 @@ export function Users() {
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [newUser, setNewUser] = useState({ name: "", email: "", role: "user" as Role });
 
+  const fetchUsers = async () => {
+    try {
+      const res = await fetch("/api/users");
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setUsers(data);
+      } else {
+        setUsers([]);
+      }
+    } catch (e) { console.error(e); }
+  };
+
   useEffect(() => {
-    return onSnapshot(collection(db, "users"), snap =>
-      setUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })))
-    );
+    fetchUsers();
   }, []);
 
   // Only admin and above can access this page
@@ -66,11 +76,12 @@ export function Users() {
     }
     setUpdating(userId);
     try {
-      await updateDoc(doc(db, "users", userId), {
-        role: newRole,
-        roleUpdatedBy: profile?.uid,
-        roleUpdatedAt: serverTimestamp(),
+      await fetch(`/api/users/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ role: newRole })
       });
+      fetchUsers();
     } catch (e) { console.error(e); }
     setUpdating(null);
   };
@@ -82,11 +93,12 @@ export function Users() {
     }
     setUpdating(userId);
     try {
-      await updateDoc(doc(db, "users", userId), {
-        disabled: !disabled,
-        accessUpdatedBy: profile?.uid,
-        accessUpdatedAt: serverTimestamp(),
+      await fetch(`/api/users/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ disabled: !disabled ? 1 : 0 })
       });
+      fetchUsers();
     } catch (e) { console.error(e); }
     setUpdating(null);
   };
@@ -102,18 +114,25 @@ export function Users() {
     }
     setUpdating("new");
     try {
-      const { setDoc, doc } = await import("firebase/firestore");
-      // Just creating a firestore document. In a real app, this would trigger an edge function to create the Firebase Auth user.
-      const newRef = doc(collection(db, "users"));
-      await setDoc(newRef, {
-        name: newUser.name,
-        email: newUser.email,
-        role: newUser.role,
-        disabled: false,
-        createdAt: new Date().toISOString()
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          uid: "usr_" + Date.now().toString(36) + Math.random().toString(36).substring(2),
+          name: newUser.name,
+          email: newUser.email,
+          role: newUser.role,
+          disabled: 0
+        })
       });
-      setIsCreateModalOpen(false);
-      setNewUser({ name: "", email: "", role: "user" as Role });
+      if (res.ok) {
+        fetchUsers();
+        setIsCreateModalOpen(false);
+        setNewUser({ name: "", email: "", role: "user" as Role });
+      } else {
+        const data = await res.json();
+        alert(data.error || "Failed to create user");
+      }
     } catch (e) {
       console.error(e);
       alert("Error creating user");
@@ -325,8 +344,12 @@ export function Users() {
                           className="h-7 w-7 flex items-center justify-center rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors"
                           onClick={async () => {
                             if (confirm(`Are you sure you want to delete user ${u.email}?`)) {
-                              const { deleteDoc, doc } = await import("firebase/firestore");
-                              await deleteDoc(doc(db, "users", u.id));
+                              try {
+                                await fetch(`/api/users/${u.id}`, { method: "DELETE" });
+                                fetchUsers();
+                              } catch (e) {
+                                console.error(e);
+                              }
                             }
                           }}
                           title="Delete User"

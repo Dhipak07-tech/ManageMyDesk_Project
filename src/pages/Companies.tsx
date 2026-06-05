@@ -228,7 +228,10 @@ export function Companies() {
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(data)
             });
-            if (!res.ok) throw new Error("Failed to create company");
+            if (!res.ok) {
+              const errData = await res.json().catch(() => ({}));
+              throw new Error(errData.error || errData.message || "Failed to create company");
+            }
             const created = await res.json();
             setCompanies(prev => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)));
             setTimeout(() => navigate(`/companies/${created.id}`), 1200);
@@ -272,7 +275,10 @@ export function Companies() {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(data)
               });
-              if (!res.ok) throw new Error("Failed to update company");
+              if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || errData.message || "Failed to update company");
+              }
               const updated = await res.json();
               setCompanies(prev => prev.map(c => c.id === selectedCompany.id ? updated : c));
               setSelectedCompany(updated);

@@ -95,10 +95,14 @@ export function ActivityTimeline({ ticketId, createdAt, refreshTrigger = 0, user
     if (!date) return "-";
     try {
       if (typeof date === "string") {
-        const d = new Date(date);
+        let dateStr = date;
+        if (dateStr.includes(" ") && !dateStr.includes("T")) {
+          dateStr = dateStr.replace(" ", "T") + "Z";
+        }
+        const d = new Date(dateStr);
         if (isNaN(d.getTime())) return "-";
         const now = new Date();
-        const diffMs = now.getTime() - d.getTime();
+        const diffMs = Math.max(0, now.getTime() - d.getTime());
         const diffMins = Math.floor(diffMs / 60000);
         const diffHours = Math.floor(diffMs / 3600000);
 

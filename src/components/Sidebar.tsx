@@ -152,7 +152,7 @@ export function Sidebar() {
       label: "Meetings",
       items: [
         { icon: CalendarDays, label: "Meeting Management", path: "/meetings" },
-        { icon: PlusCircle,   label: "Create Meeting",     path: "/create-meeting" },
+        { icon: PlusCircle, label: "Create Meeting", path: "/create-meeting" },
       ]
     },
     {

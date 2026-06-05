@@ -117,11 +117,11 @@ export function TicketDetail() {
       });
   }, []);
 
-  // DYNAMIC GROUP FILTERING: Only show users belonging to the selected group
+  // DYNAMIC GROUP FILTERING: Only show users belonging to the selected group, or all agents if no group selected
   const selectedGroupObj = groups.find(g => g.name === editedTicket?.assignmentGroup);
-  const filteredAgents = agents.filter(a =>
-    selectedGroupObj?.memberIds?.includes(a.id) || selectedGroupObj?.memberIds?.includes(a.uid)
-  );
+  const filteredAgents = selectedGroupObj?.memberIds
+    ? agents.filter(a => selectedGroupObj.memberIds?.includes(a.id) || selectedGroupObj.memberIds?.includes(a.uid))
+    : agents;
 
   // Load active timer state from Firestore on mount
   useEffect(() => {
@@ -239,8 +239,6 @@ export function TicketDetail() {
       const historyEntries: any[] = [];
       const fields = ["incidentCategory", "incident_category", "category", "categoryId", "subcategory", "subcategoryId", "service", "serviceId", "serviceProvider", "status", "impact", "urgency", "assignmentGroup", "title", "description", "assignedTo", "affectedUser", "resolutionCode", "resolutionNotes", "resolutionMethod", "closureReason", "watchList", "workNotesList", "businessPhone", "location", "configurationItem", "computerName", "knowledgeArticleUsed", "originalAssignmentGroup", "acknowledged", "passwordReset", "rackspaceTicketNo", "additionalInformation"];
 
-      const fieldChanges: any[] = [];
-
       fields.forEach(field => {
         if (editedTicket[field] !== (ticket[field] || "")) {
           const entry = {
@@ -249,13 +247,6 @@ export function TicketDetail() {
             user: profile?.name || user.email
           };
           historyEntries.push(entry);
-
-          // Capture for activities API
-          fieldChanges.push({
-            fieldName: field,
-            oldValue: ticket[field] || "none",
-            newValue: editedTicket[field] || "none"
-          });
         }
       });
 
@@ -408,9 +399,8 @@ export function TicketDetail() {
           console.error("Error saving dynamic custom fields:", e);
         }
       }
-
       await updateDoc(ticketRef, finalUpdates);
-
+      setTimelineRefresh(prev => prev + 1);
       // Dispatch real-time notification
       try {
         fetch("/api/notifications/dispatch", {
@@ -440,61 +430,8 @@ export function TicketDetail() {
         console.error("Failed to dispatch update notification:", e);
       }
 
-      // Log status change and other field changes to activity timeline
-      if (fieldChanges.length > 0) {
-        try {
-          const isResolving = (editedTicket.status === "Resolved" || editedTicket.status === "Closed") && ticket.status !== "Resolved" && ticket.status !== "Closed";
-
-          // Log each field change individually for the timeline
-          for (const change of fieldChanges) {
-            await fetch(`/api/tickets/${id}/activities`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                activity_type: change.fieldName === 'status' ? (isResolving ? 'resolution' : 'status_change') : 'field_change',
-                visibility_type: 'public',
-                created_by: user.uid,
-                created_by_name: profile?.name || user.email,
-                message: change.fieldName === 'status' && isResolving
-                  ? `Ticket resolved with code: ${editedTicket.resolutionCode}. Method: ${editedTicket.resolutionMethod}`
-                  : `Changed ${change.fieldName.replace(/([A-Z])/g, ' $1').trim()} from "${change.oldValue}" to "${change.newValue}"`,
-                metadata_json: {
-                  fieldName: change.fieldName,
-                  oldValue: change.oldValue,
-                  newValue: change.newValue,
-                  resolutionCode: editedTicket.resolutionCode,
-                  resolutionMethod: editedTicket.resolutionMethod,
-                  closureReason: editedTicket.closureReason,
-                  resolutionNotes: editedTicket.resolutionNotes
-                }
-              })
-            });
-          }
-          setTimelineRefresh(prev => prev + 1);
-        } catch (e) { /* non-critical */ }
-      }
-
-      // Log assignment change to activity timeline
-      if (editedTicket.assignedTo !== ticket.assignedTo) {
-        try {
-          const newAgent = agents.find(a => a.id === editedTicket.assignedTo);
-          const oldAgent = agents.find(a => a.id === ticket.assignedTo);
-          await fetch(`/api/tickets/${id}/activities`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              activity_type: 'assignment_change',
-              visibility_type: 'internal',
-              created_by: user.uid,
-              created_by_name: profile?.name || user.email,
-              message: `Assignment changed from "${oldAgent?.name || ticket.assignedToName || 'Unassigned'}" to "${newAgent?.name || assignedUserName || 'Unassigned'}"`,
-              metadata_json: { oldAssignee: oldAgent?.name || ticket.assignedToName, newAssignee: newAgent?.name || assignedUserName }
-            })
-          });
-          setTimelineRefresh(prev => prev + 1);
-        } catch (e) { /* non-critical */ }
-      }
-
+      // Assignment changes and all other field changes are securely generated by the backend API.
+      
       if (pointsAwarded > 0) {
         confetti({
           particleCount: 150,
@@ -1288,52 +1225,51 @@ export function TicketDetail() {
               {/* Incident Category Dynamic Custom Dropdowns */}
               {(["admin", "super_admin", "ultra_super_admin"].includes(profile?.role || "") ||
                 ["arun@technosprint.net", "ulter@technosprint.net", "admin@technosprint.net", "admin@connectit.local", "demo-admin@connectit.local", "demo-super_admin@connectit.local", "demo-ultra_super_admin@connectit.local"].includes(user?.email || profile?.email || "")) && (
-                <>
-                  {dynamicFields.map((field) => {
-                    const fieldOptions = dynamicOptions[field.id] || [];
-                    return (
-                      <div key={field.id} className="grid grid-cols-3 items-center gap-4">
+                  <>
+                    {dynamicFields.map((field) => {
+                      const fieldOptions = dynamicOptions[field.id] || [];
+                      return (
+                        <div key={field.id} className="grid grid-cols-3 items-center gap-4">
+                          <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
+                            <span className="text-red-500 font-bold">*</span> {field.name}
+                          </label>
+                          <select
+                            value={editedTicket?.customFields?.[field.id] || ""}
+                            onChange={e => {
+                              setEditedTicket((prev: any) => ({
+                                ...prev,
+                                customFields: {
+                                  ...(prev?.customFields || {}),
+                                  [field.id]: e.target.value
+                                }
+                              }));
+                            }}
+                            className="col-span-2 p-1.5 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8 bg-white"
+                            required
+                          >
+                            <option value="">Select {field.name}</option>
+                            {fieldOptions.map((opt: any) => (
+                              <option key={opt.id} value={opt.value_text}>{opt.value_text}</option>
+                            ))}
+                          </select>
+                        </div>
+                      );
+                    })}
+                    {dynamicFields.length === 0 && (
+                      <div className="grid grid-cols-3 items-center gap-4">
                         <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
-                          <span className="text-red-500 font-bold">*</span> {field.name}
+                          Incident Category
                         </label>
                         <select
                           disabled
-                          value={editedTicket?.customFields?.[field.id] || ""}
-                          onChange={e => {
-                            setEditedTicket((prev: any) => ({
-                              ...prev,
-                              customFields: {
-                                ...(prev?.customFields || {}),
-                                [field.id]: e.target.value
-                              }
-                            }));
-                          }}
-                          className="col-span-2 p-1.5 bg-muted/30 border border-border rounded text-xs focus:ring-1 focus:ring-sn-green outline-none h-8 bg-white"
-                          required
+                          className="col-span-2 p-1.5 border border-border rounded text-xs outline-none h-8 bg-muted/20"
                         >
-                          <option value="">Select {field.name}</option>
-                          {fieldOptions.map((opt: any) => (
-                            <option key={opt.id} value={opt.value_text}>{opt.value_text}</option>
-                          ))}
+                          <option>No dynamic custom categories defined</option>
                         </select>
                       </div>
-                    );
-                  })}
-                  {dynamicFields.length === 0 && (
-                    <div className="grid grid-cols-3 items-center gap-4">
-                      <label className="text-[11px] text-right font-medium text-muted-foreground uppercase leading-tight">
-                        Incident Category
-                      </label>
-                      <select
-                        disabled
-                        className="col-span-2 p-1.5 border border-border rounded text-xs outline-none h-8 bg-muted/20"
-                      >
-                        <option>No dynamic custom categories defined</option>
-                      </select>
-                    </div>
-                  )}
-                </>
-              )}
+                    )}
+                  </>
+                )}
 
               {/* Configuration Item */}
               <div className="grid grid-cols-3 items-center gap-4">
@@ -1699,18 +1635,18 @@ export function TicketDetail() {
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <SLATimer 
-                    label="Response" 
-                    deadline={ticket.responseDeadline} 
+                  <SLATimer
+                    label="Response"
+                    deadline={ticket.responseDeadline}
                     metAt={ticket.firstResponseAt}
                     startTime={ticket.responseSlaStartTime}
                     isPaused={ticket.status === 'On Hold' || ticket.status === 'Awaiting User'}
                     onHoldStart={ticket.onHoldStart}
                     totalPausedTime={ticket.totalPausedTime}
                   />
-                  <SLATimer 
-                    label="Resolution" 
-                    deadline={ticket.resolutionDeadline} 
+                  <SLATimer
+                    label="Resolution"
+                    deadline={ticket.resolutionDeadline}
                     metAt={ticket.resolvedAt}
                     startTime={ticket.resolutionSlaStartTime}
                     waitUntil={ticket.firstResponseAt || (editedTicket.status !== "New" ? new Date().toISOString() : null)}
@@ -1753,46 +1689,46 @@ export function TicketDetail() {
               </div>
 
               <div className="bg-slate-50 border border-slate-200 rounded-xl p-6">
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black uppercase text-slate-500">Response Performance</span>
-                        <span className="text-xs font-mono font-bold text-slate-700">Target: {ticket.responseDeadline ? new Date(ticket.responseDeadline).toLocaleTimeString() : '--'}</span>
-                      </div>
-                      <SLATimer 
-                        label="Live Response" 
-                        deadline={ticket.responseDeadline} 
-                        metAt={ticket.firstResponseAt}
-                        startTime={ticket.responseSlaStartTime}
-                        isPaused={ticket.status === 'On Hold'}
-                        onHoldStart={ticket.onHoldStart}
-                        totalPausedTime={ticket.totalPausedTime}
-                      />
-                      <div className="p-3 bg-white rounded-lg border border-slate-200 text-[10px] text-slate-500 italic">
-                        The Response SLA tracks the time from ticket creation until the first meaningful update by an agent.
-                      </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-12">
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase text-slate-500">Response Performance</span>
+                      <span className="text-xs font-mono font-bold text-slate-700">Target: {ticket.responseDeadline ? new Date(ticket.responseDeadline).toLocaleTimeString() : '--'}</span>
                     </div>
+                    <SLATimer
+                      label="Live Response"
+                      deadline={ticket.responseDeadline}
+                      metAt={ticket.firstResponseAt}
+                      startTime={ticket.responseSlaStartTime}
+                      isPaused={ticket.status === 'On Hold'}
+                      onHoldStart={ticket.onHoldStart}
+                      totalPausedTime={ticket.totalPausedTime}
+                    />
+                    <div className="p-3 bg-white rounded-lg border border-slate-200 text-[10px] text-slate-500 italic">
+                      The Response SLA tracks the time from ticket creation until the first meaningful update by an agent.
+                    </div>
+                  </div>
 
-                    <div className="space-y-4">
-                      <div className="flex items-center justify-between">
-                        <span className="text-[11px] font-black uppercase text-slate-500">Resolution Performance</span>
-                        <span className="text-xs font-mono font-bold text-slate-700">Target: {ticket.resolutionDeadline ? new Date(ticket.resolutionDeadline).toLocaleTimeString() : '--'}</span>
-                      </div>
-                      <SLATimer 
-                        label="Live Resolution" 
-                        deadline={ticket.resolutionDeadline} 
-                        metAt={ticket.resolvedAt}
-                        startTime={ticket.resolutionSlaStartTime}
-                        waitUntil={ticket.firstResponseAt || (editedTicket.status !== "New" ? new Date().toISOString() : null)}
-                        isPaused={ticket.status === 'On Hold'}
-                        onHoldStart={ticket.onHoldStart}
-                        totalPausedTime={ticket.totalPausedTime}
-                      />
-                      <div className="p-3 bg-white rounded-lg border border-slate-200 text-[10px] text-slate-500 italic">
-                        The Resolution SLA starts after the first response and tracks the total time until the incident is marked as Resolved.
-                      </div>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase text-slate-500">Resolution Performance</span>
+                      <span className="text-xs font-mono font-bold text-slate-700">Target: {ticket.resolutionDeadline ? new Date(ticket.resolutionDeadline).toLocaleTimeString() : '--'}</span>
                     </div>
-                 </div>
+                    <SLATimer
+                      label="Live Resolution"
+                      deadline={ticket.resolutionDeadline}
+                      metAt={ticket.resolvedAt}
+                      startTime={ticket.resolutionSlaStartTime}
+                      waitUntil={ticket.firstResponseAt || (editedTicket.status !== "New" ? new Date().toISOString() : null)}
+                      isPaused={ticket.status === 'On Hold'}
+                      onHoldStart={ticket.onHoldStart}
+                      totalPausedTime={ticket.totalPausedTime}
+                    />
+                    <div className="p-3 bg-white rounded-lg border border-slate-200 text-[10px] text-slate-500 italic">
+                      The Resolution SLA starts after the first response and tracks the total time until the incident is marked as Resolved.
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -1839,7 +1775,7 @@ export function TicketDetail() {
                       </p>
                     </div>
                   </div>
-                  
+
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="space-y-1">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Root Cause Analysis</span>
@@ -1847,7 +1783,7 @@ export function TicketDetail() {
                         {effectiveSlaDelay.meta.rootCauseAnalysis || "N/A"}
                       </p>
                     </div>
-                    
+
                     <div className="space-y-1">
                       <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">Dependencies & Blockers</span>
                       <p className="text-xs text-slate-700 bg-white p-3 rounded-lg border border-slate-200/60 min-h-[60px] whitespace-pre-wrap">
