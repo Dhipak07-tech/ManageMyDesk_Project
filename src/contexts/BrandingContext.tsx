@@ -28,8 +28,26 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(firebaseAvailable); // only loading if Firebase is available
 
   useEffect(() => {
+    const fetchFallbackBranding = async () => {
+      try {
+        const res = await fetch("/api/settings/branding");
+        if (res.ok) {
+          const data = await res.json();
+          setBranding({
+            companyName: data.companyName || defaultBranding.companyName,
+            logoBase64: data.logoBase64 || null,
+            logoType: data.logoType || null,
+          });
+        }
+      } catch (e) {
+        console.warn("[BrandingContext] Fallback API fetch failed:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
     if (!firebaseAvailable) {
-      setLoading(false);
+      fetchFallbackBranding();
       return;
     }
 
@@ -46,41 +64,100 @@ export function BrandingProvider({ children }: { children: React.ReactNode }) {
               logoBase64: data.logoBase64 || null,
               logoType: data.logoType || null,
             });
+            setLoading(false);
+          } else {
+            fetchFallbackBranding();
           }
-          setLoading(false);
         },
         (error) => {
-          console.warn("[BrandingContext] Firestore error (non-fatal):", error.message);
-          setLoading(false);
+          console.warn("[BrandingContext] Firestore error, falling back to API:", error.message);
+          fetchFallbackBranding();
         }
       );
     } catch (e) {
-      console.warn("[BrandingContext] Failed to subscribe to branding:", e);
-      setLoading(false);
+      console.warn("[BrandingContext] Failed to subscribe to branding, falling back to API:", e);
+      fetchFallbackBranding();
     }
 
     return () => { if (unsubscribe) unsubscribe(); };
   }, []);
 
   const updateCompanyName = async (name: string) => {
-    if (!firebaseAvailable) return;
+    if (firebaseAvailable) {
+      try {
+        const brandingRef = doc(db, "settings", "branding");
+        await setDoc(brandingRef, { companyName: name }, { merge: true });
+      } catch (e) {
+        console.warn("[BrandingContext] Firebase updateCompanyName failed:", e);
+      }
+    }
     try {
-      const brandingRef = doc(db, "settings", "branding");
-      await setDoc(brandingRef, { companyName: name }, { merge: true });
+      const res = await fetch("/api/settings/branding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: name,
+          logoBase64: branding.logoBase64,
+          logoType: branding.logoType,
+          updatedBy: "System"
+        })
+      });
+      if (res.ok) {
+        setBranding(prev => ({ ...prev, companyName: name }));
+      }
     } catch (e) {
-      console.warn("[BrandingContext] updateCompanyName failed:", e);
+      console.error("[BrandingContext] Fallback API updateCompanyName failed:", e);
     }
   };
 
   const updateLogo = async (base64: string | null, type: string | null) => {
-    if (!firebaseAvailable) return;
+    if (firebaseAvailable) {
+      try {
+        const brandingRef = doc(db, "settings", "branding");
+        await setDoc(brandingRef, { logoBase64: base64, logoType: type }, { merge: true });
+      } catch (e) {
+        console.warn("[BrandingContext] Firebase updateLogo failed:", e);
+      }
+    }
     try {
-      const brandingRef = doc(db, "settings", "branding");
-      await setDoc(brandingRef, { logoBase64: base64, logoType: type }, { merge: true });
+      const res = await fetch("/api/settings/branding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          companyName: branding.companyName,
+          logoBase64: base64,
+          logoType: type,
+          updatedBy: "System"
+        })
+      });
+      if (res.ok) {
+        setBranding(prev => ({ ...prev, logoBase64: base64, logoType: type }));
+      }
     } catch (e) {
-      console.warn("[BrandingContext] updateLogo failed:", e);
+      console.error("[BrandingContext] Fallback API updateLogo failed:", e);
     }
   };
+
+  useEffect(() => {
+    // Update document title dynamically
+    if (branding.companyName) {
+      const currentTitle = document.title;
+      const parts = currentTitle.split(" - ");
+      const pageName = parts[0] || "Ticklora";
+      document.title = `${pageName} - ${branding.companyName}`;
+    }
+
+    // Update favicon dynamically
+    if (branding.logoBase64) {
+      let faviconLink = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+      if (!faviconLink) {
+        faviconLink = document.createElement("link");
+        faviconLink.rel = "icon";
+        document.head.appendChild(faviconLink);
+      }
+      faviconLink.href = branding.logoBase64;
+    }
+  }, [branding]);
 
   return (
     <BrandingContext.Provider value={{ branding, updateCompanyName, updateLogo, loading }}>

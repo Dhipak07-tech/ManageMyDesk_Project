@@ -5068,6 +5068,51 @@ Respond ONLY with JSON: {"summary": "your summary here"}`;
     }
   });
 
+  // ═══ BRANDING API ═══
+  // Stores company name and logo in system_settings table (MySQL/SQLite)
+  // No Firestore dependency — works with the existing database
+
+  app.get('/api/branding', async (req, res) => {
+    try {
+      const rows = await query(
+        "SELECT setting_key, setting_value FROM system_settings WHERE setting_key IN ('branding_company_name','branding_logo_base64','branding_logo_type')"
+      );
+      const map: Record<string,string> = {};
+      rows.forEach((r: any) => { map[r.setting_key] = r.setting_value; });
+      res.json({
+        companyName:  map['branding_company_name']  || 'Connect',
+        logoBase64:   map['branding_logo_base64']   || null,
+        logoType:     map['branding_logo_type']     || null,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post('/api/branding', async (req, res) => {
+    try {
+      const { companyName, logoBase64, logoType } = req.body;
+
+      async function upsert(key: string, value: string | null) {
+        if (value === undefined) return;
+        const existing = await query("SELECT id FROM system_settings WHERE setting_key = ?", [key]);
+        if (existing.length > 0) {
+          await execute("UPDATE system_settings SET setting_value = ?, updated_at = CURRENT_TIMESTAMP WHERE setting_key = ?", [value, key]);
+        } else {
+          await execute("INSERT INTO system_settings (setting_key, setting_value, setting_type) VALUES (?, ?, 'string')", [key, value]);
+        }
+      }
+
+      if (companyName !== undefined) await upsert('branding_company_name', companyName);
+      if (logoBase64  !== undefined) await upsert('branding_logo_base64',  logoBase64);
+      if (logoType    !== undefined) await upsert('branding_logo_type',    logoType);
+
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   // ═══ AI GENERATE NOTES (for Work Notes Chat) ═══
   app.post('/api/ai/generate-notes', async (req: any, res: any) => {
     try {
